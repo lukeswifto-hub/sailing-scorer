@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>SGS Regatta Scorer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.26.10/babel.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body,#root{height:100%}
+body{background:#0b1829;font-family:'Outfit',system-ui,sans-serif;overflow-x:hidden}
+input,button{outline:none}
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:#263d5e;border-radius:4px}
+table{border-collapse:collapse;width:100%}
+th,td{padding:8px 6px;font-size:13px}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect,useMemo}=React;
+const C={bg:"#0b1829",surface:"#122038",card:"#19294a",border:"#263d5e",primary:"#00c2e0",amber:"#f0b429",red:"#ef4444",green:"#22c55e",text:"#f0f4f8",textDim:"#7b8fa8",textMuted:"#4a5f78",white:"#fff"};
+const mono="'JetBrains Mono',monospace",sans="'Outfit',system-ui,sans-serif";
+const PEN_CODES=["DSQ","UFD","OCS","DNS","DNF","RET","DNC","BFD","DNE","RAF"];
+const isPen=r=>typeof r==="string"&&PEN_CODES.includes((r||"").toUpperCase());
+function ordinal(n){if(typeof n==='string')return n;const s=["th","st","nd","rd"];const v=n%100;return n+(s[(v-20)%10]||s[v]||s[0]);}
+
+function calcNet(results,penScore,racesCompleted,numDiscards){
+  const valid=results.slice(0,racesCompleted).map((r,i)=>({i,score:r==null?null:(isPen(r)?penScore:Number(r))})).filter(s=>s.score!=null);
+  if(!valid.length)return{net:0,total:0,discIdx:[]};
+  const total=valid.reduce((s,x)=>s+x.score,0);
+  const nd=racesCompleted>=3?numDiscards:0;
+  const sorted=[...valid].sort((a,b)=>b.score-a.score);
+  const discIdx=sorted.slice(0,Math.min(nd,valid.length)).map(s=>s.i);
+  const net=total-discIdx.reduce((s,i)=>s+valid.find(v=>v.i===i).score,0);
+  return{net,total,discIdx};
+}
+
+function compressScores(sailors){
+  if(!sailors.length)return sailors;
+  const orig=sailors.map(x=>({...x}));orig.sort((a,b)=>a.qualRank-b.qualRank);
+  const adj=orig.map(x=>({...x,adjustedNet:x.qualNet}));
+  for(let i=1;i<adj.length;i++){const g=orig[i].qualNet-orig[i-1].qualNet;adj[i].adjustedNet=g>9?adj[i-1].adjustedNet+9:adj[i-1].adjustedNet+g;}
+  if(adj.length>=3){const t=adj[2].adjustedNet;for(let i=3;i<adj.length;i++){if(adj[i].adjustedNet>t+18)adj[i].adjustedNet=t+18;}}
+  return adj;
+}
+function calcFinalsOverall(a,f1,f2,ff){return a+(f1!=null?(isPen(f1)?ff+1:Number(f1)):0)+(f2!=null?(isPen(f2)?ff+1:Number(f2)):0);}
+
+const SKEY="sgs-scorer-v5";
+function load(){try{const d=localStorage.getItem(SKEY);return d?JSON.parse(d):null}catch{return null}}
+function save(d){try{localStorage.setItem(SKEY,JSON.stringify(d))}catch(e){}}
+
+function Card({children,style,highlight}){return<div style={{background:C.card,borderRadius:8,border:"1px solid "+(highlight?C.primary+"44":C.border),padding:16,...style}}>{children}</div>}
+function Badge({children,color=C.primary}){return<span style={{display:"inline-block",padding:"2px 7px",borderRadius:4,background:color+"22",color,fontSize:11,fontFamily:mono,fontWeight:700}}>{children}</span>}
+function SectionTitle({children}){return<h3 style={{color:C.primary,fontFamily:sans,fontSize:13,margin:"0 0 12px",textTransform:"uppercase",letterSpacing:"1px"}}>{children}</h3>}
+function NumberStepper({label,value,onChange,min=0,max=999}){
+  const bs={width:36,height:36,borderRadius:6,border:"1px solid "+C.border,background:C.surface,color:C.text,fontSize:18,cursor:"pointer",fontFamily:mono,display:"flex",alignItems:"center",justifyContent:"center"};
+  return<div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 0"}}><span style={{color:C.textDim,fontFamily:sans,fontSize:14}}>{label}</span><div style={{display:"flex",alignItems:"center",gap:8}}><button onClick={()=>onChange(Math.max(min,value-1))} style={bs}>−</button><span style={{fontFamily:mono,fontSize:18,color:C.white,minWidth:32,textAlign:"center",fontWeight:700}}>{value}</span><button onClick={()=>onChange(Math.min(max,value+1))} style={bs}>+</button></div></div>
+}
+
+// Position grid for entering results
+function PosGrid({fleetSize,result,onSet,onClear}){
+  return<div>
+    <div style={{display:"grid",gridTemplateColumns:"repeat("+Math.min(fleetSize,10)+",1fr)",gap:4,marginBottom:8}}>
+      {Array.from({length:fleetSize},(_,p)=>{const pos=p+1;const sel=result===pos;return<button key={pos} onClick={()=>onSet(pos)} style={{padding:"8px 2px",borderRadius:4,border:"1px solid "+(sel?C.primary:C.border),background:sel?C.primary:C.surface,color:sel?C.bg:C.text,fontFamily:mono,fontSize:13,fontWeight:700,cursor:"pointer"}}>{pos}</button>})}
+    </div>
+    <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+      {["DSQ","UFD","OCS","DNS","DNF","BFD"].map(code=>{const sel=result===code;return<button key={code} onClick={()=>onSet(code)} style={{padding:"6px 10px",borderRadius:4,border:"1px solid "+(sel?C.red:C.red+"44"),background:sel?C.red:C.red+"15",color:sel?C.white:C.red,fontFamily:mono,fontSize:11,fontWeight:700,cursor:"pointer"}}>{code}</button>})}
+    </div>
+  </div>;
+}
+
+// Status badge based on net vs cutoff
+function StatusBadge({net,optimistic,expected,pessimistic}){
+  if(net<=optimistic)return<Badge color={C.green}>SAFE</Badge>;
+  if(net<=expected)return<Badge color={C.primary}>ON TRACK</Badge>;
+  if(net<=pessimistic)return<Badge color={C.amber}>CLOSE</Badge>;
+  return<Badge color={C.red}>AT RISK</Badge>;
+}
+
+function estimateGoldCutoff(totalEntries,numFleets,totalRaces){
+  const gs=Math.ceil(totalEntries/numFleets);const fs=gs;const pen=fs+1;
+  const avg=Math.round(fs/3);const cr=totalRaces>=3?totalRaces-1:totalRaces;
+  const exp=avg*cr;return{gs,fs,pen,avg,cr,exp,opt:Math.round(exp*0.85),pes:Math.round(exp*1.15),totalRaces,hasDisc:totalRaces>=3};
+}
+
+// ═══════════════════════════════════════
+// PRELIM VIEW
+// ═══════════════════════════════════════
+function PrelimView({prelim,setPrelim}){
+  const {config,mySailors}=prelim;
+  const setConfig=(fn)=>setPrelim(p=>({...p,config:fn(p.config)}));
+  const setSailors=(fn)=>setPrelim(p=>({...p,mySailors:fn(p.mySailors)}));
+  const [newName,setNewName]=useState("");
+  const [expS,setExpS]=useState(null);
+  const [expR,setExpR]=useState(null);
+  const est=useMemo(()=>estimateGoldCutoff(config.totalEntries,config.numFleets,config.totalRaces),[config]);
+  const addS=()=>{if(!newName.trim())return;setSailors(p=>[...p,{name:newName.trim(),results:[]}]);setNewName("")};
+  const remS=(i)=>setSailors(p=>p.filter((_,j)=>j!==i));
+  const setRes=(si,ri,val)=>{setSailors(p=>p.map((s,i)=>{if(i!==si)return s;const nr=[...s.results];while(nr.length<=ri)nr.push(null);nr[ri]=val;return{...s,results:nr}}));if(ri<config.racesCompleted-1)setExpR(ri+1);else setExpR(null)};
+  const clrRes=(si,ri)=>setSailors(p=>p.map((s,i)=>{if(i!==si)return s;const nr=[...s.results];nr[ri]=null;return{...s,results:nr}}));
+
+  return<div style={{display:"flex",flexDirection:"column",gap:16}}>
+    <Card><SectionTitle>Preliminary Series Config</SectionTitle>
+      <NumberStepper label="Total Entries" value={config.totalEntries} onChange={v=>setConfig(c=>({...c,totalEntries:v}))} min={10} max={400}/>
+      <NumberStepper label="Fleets" value={config.numFleets} onChange={v=>setConfig(c=>({...c,numFleets:v}))} min={1} max={4}/>
+      <NumberStepper label="Total Races" value={config.totalRaces} onChange={v=>setConfig(c=>({...c,totalRaces:v}))} min={1} max={10}/>
+      <NumberStepper label="Races Completed" value={config.racesCompleted} onChange={v=>setConfig(c=>({...c,racesCompleted:Math.min(v,config.totalRaces)}))} min={0} max={config.totalRaces}/>
+      <div style={{marginTop:8,display:"flex",gap:12,flexWrap:"wrap",fontSize:11,color:C.textMuted}}>
+        <span>Fleet: ~{est.fs}</span><span>Pen: {est.pen}</span><span>Disc: {config.racesCompleted>=3?"1":"0"}</span><span>Gold: top {est.gs}</span>
+      </div>
+    </Card>
+    <Card highlight><SectionTitle>Gold Fleet Cutoff</SectionTitle>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:12}}>
+        {[{v:est.opt,l:"COMFORTABLE",c:C.green},{v:est.exp,l:"PROJECTED",c:C.primary,hl:true},{v:est.pes,l:"TIGHT",c:C.amber}].map((x,i)=>
+          <div key={i} style={{background:C.surface,borderRadius:6,padding:"10px 8px",textAlign:"center",border:x.hl?"1px solid "+C.primary+"33":"none"}}>
+            <div style={{fontFamily:mono,fontSize:20,fontWeight:700,color:x.c}}>{x.v}</div>
+            <div style={{fontFamily:sans,fontSize:10,color:C.textMuted,marginTop:2}}>{x.l}</div></div>)}
+      </div>
+      <div style={{fontSize:12,color:C.textDim,lineHeight:1.6}}>Target avg: <b style={{color:C.white}}>~{ordinal(est.avg)}</b> / ~{est.fs} per race ({est.hasDisc?"1 discard":"no discard"})</div>
+    </Card>
+    <Card>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><SectionTitle>My Sailors</SectionTitle><Badge>{mySailors.length}</Badge></div>
+      <div style={{display:"flex",gap:8,marginBottom:12}}>
+        <input placeholder="Sailor name" value={newName} onChange={e=>setNewName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addS()} style={{flex:1,padding:"10px 12px",borderRadius:6,border:"1px solid "+C.border,background:C.surface,color:C.text,fontSize:14,fontFamily:sans}}/>
+        <button onClick={addS} style={{padding:"10px 16px",borderRadius:6,border:"none",background:C.primary,color:C.bg,fontFamily:sans,fontSize:14,fontWeight:700,cursor:"pointer"}}>+</button>
+      </div>
+      {mySailors.map((sailor,si)=>{
+        const sc=calcNet(sailor.results,est.pen,config.racesCompleted,1);const filled=sailor.results.filter(r=>r!=null).length;const isE=expS===si;
+        const rL=config.totalRaces-config.racesCompleted;const pR=est.exp-sc.net;const aN=rL>0?Math.ceil(Math.max(0,pR)/rL):0;
+        return<div key={si} style={{marginBottom:8}}><Card style={{padding:0,overflow:"hidden"}}>
+          <div onClick={()=>{setExpS(isE?null:si);setExpR(null)}} style={{padding:"14px 16px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div style={{display:"flex",alignItems:"center",gap:10}}><span style={{fontFamily:sans,fontSize:14,color:C.white,fontWeight:600}}>{sailor.name}</span><Badge color={C.textDim}>{filled}/{config.racesCompleted}R</Badge></div>
+            <div style={{display:"flex",alignItems:"center",gap:12}}>
+              {filled>0&&<><div style={{textAlign:"right"}}><div style={{fontFamily:mono,fontSize:16,fontWeight:700,color:C.primary}}>{sc.net}</div><div style={{fontFamily:sans,fontSize:9,color:C.textMuted}}>NET</div></div>
+              <StatusBadge net={sc.net} optimistic={est.opt} expected={est.exp} pessimistic={est.pes}/></>}
+              <span style={{color:C.textMuted,fontSize:12}}>{isE?"▲":"▼"}</span></div>
+          </div>
+          {isE&&<div style={{borderTop:"1px solid "+C.border}}>
+            {filled>0&&<div style={{padding:"12px 16px",display:"flex",gap:8,flexWrap:"wrap"}}>
+              {Array.from({length:config.racesCompleted},(_,ri)=>{const r=sailor.results[ri];const isD=sc.discIdx.includes(ri);
+                return<div key={ri} style={{padding:"6px 10px",borderRadius:6,background:isD?C.amber+"15":C.surface,border:"1px solid "+(isD?C.amber+"44":C.border),textAlign:"center",minWidth:40}}>
+                  <div style={{fontFamily:sans,fontSize:9,color:C.textMuted}}>R{ri+1}</div>
+                  <div style={{fontFamily:mono,fontSize:14,fontWeight:700,color:r==null?C.textMuted:isPen(r)?C.red:isD?C.amber:C.white,textDecoration:isD?"line-through":"none"}}>{r??"-"}</div></div>})}
+              <div style={{padding:"6px 10px",borderRadius:6,background:C.primary+"15",border:"1px solid "+C.primary+"33",textAlign:"center"}}><div style={{fontFamily:sans,fontSize:9,color:C.primary}}>NET</div><div style={{fontFamily:mono,fontSize:14,fontWeight:700,color:C.primary}}>{sc.net}</div></div>
+            </div>}
+            {rL>0&&filled>0&&<div style={{padding:"8px 16px",background:C.surface,borderTop:"1px solid "+C.border+"22"}}>
+              {pR<=0?<div style={{fontSize:12,color:C.green}}>✓ Under projected cutoff</div>:
+              <div style={{fontSize:12,color:C.textDim}}>Need <b style={{color:C.white}}>{pR} pts</b> in <b style={{color:C.white}}>{rL} races</b> → avg <b style={{color:aN<=est.avg?C.green:C.amber}}>{ordinal(aN)}</b> or better</div>}
+            </div>}
+            <div style={{padding:"12px 16px"}}>{Array.from({length:config.racesCompleted},(_,ri)=>{
+              const result=sailor.results[ri];const isRE=expR===ri;
+              return<div key={ri} style={{marginBottom:4}}>
+                <div onClick={()=>setExpR(isRE?null:ri)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 12px",borderRadius:6,cursor:"pointer",background:isRE?C.surface:"transparent",border:"1px solid "+(isRE?C.border:"transparent")}}>
+                  <span style={{color:C.textDim,fontFamily:mono,fontSize:13}}>R{ri+1}</span>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    {result!=null?<><span style={{fontFamily:mono,fontSize:16,fontWeight:700,color:isPen(result)?C.red:C.white}}>{isPen(result)?result:ordinal(result)}</span><button onClick={e=>{e.stopPropagation();clrRes(si,ri)}} style={{background:"none",border:"none",color:C.textMuted,cursor:"pointer",fontSize:12}}>✕</button></>:<span style={{color:C.textMuted,fontSize:12}}>tap</span>}
+                    <span style={{color:C.textMuted,fontSize:10}}>{isRE?"▲":"▼"}</span></div>
+                </div>
+                {isRE&&<div style={{padding:"8px 12px"}}><PosGrid fleetSize={est.fs} result={result} onSet={v=>setRes(si,ri,v)} onClear={()=>clrRes(si,ri)}/></div>}
+              </div>})}</div>
+            <div style={{padding:"8px 16px 12px",display:"flex",justifyContent:"flex-end"}}><button onClick={()=>remS(si)} style={{background:"none",border:"1px solid "+C.red+"44",borderRadius:6,color:C.red,fontSize:11,padding:"6px 12px",cursor:"pointer"}}>Remove</button></div>
+          </div>}
+        </Card></div>})}
+      {!mySailors.length&&<div style={{color:C.textMuted,textAlign:"center",padding:20,fontSize:13}}>Add your sailors to track preliminary results</div>}
+    </Card>
+  </div>;
+}
+
+// ═══════════════════════════════════════
+// ELIMINATION VIEW
+// ═══════════════════════════════════════
+function ElimView({elim,setElim}){
+  const {config,mySailors}=elim;
+  const setConfig=(fn)=>setElim(p=>({...p,config:fn(p.config)}));
+  const setSailors=(fn)=>setElim(p=>({...p,mySailors:fn(p.mySailors)}));
+  const [newName,setNewName]=useState("");
+  const [newPrelimRank,setNewPrelimRank]=useState("");
+  const [expS,setExpS]=useState(null);
+  const [expR,setExpR]=useState(null);
+
+  const penScore=config.goldFleetSize+1;
+  const finalsTop=10;
+
+  // Estimate finals cutoff: top 10 out of gold fleet
+  // With gold fleet of ~67, top 10 avg finish ~ fleet/6.7 ≈ 10th
+  const estAvgFinish=Math.round(config.goldFleetSize/6.7);
+  const countingRaces=config.totalRaces>=3?config.totalRaces-1:config.totalRaces;
+  // Expected elim race net for 10th place sailor
+  const estElimNet=estAvgFinish*countingRaces;
+  // Plus their prelim rank carry (they'd be around rank 10 from prelim)
+  const estPrelimCarry=10;
+  const estTotalCutoff=estElimNet+estPrelimCarry;
+  const estOptimistic=Math.round(estTotalCutoff*0.85);
+  const estPessimistic=Math.round(estTotalCutoff*1.15);
+
+  const addS=()=>{
+    if(!newName.trim()||!newPrelimRank)return;
+    setSailors(p=>[...p,{name:newName.trim(),prelimRank:Number(newPrelimRank),results:[]}]);
+    setNewName("");setNewPrelimRank("");
+  };
+  const remS=(i)=>setSailors(p=>p.filter((_,j)=>j!==i));
+  const setRes=(si,ri,val)=>{setSailors(p=>p.map((s,i)=>{if(i!==si)return s;const nr=[...s.results];while(nr.length<=ri)nr.push(null);nr[ri]=val;return{...s,results:nr}}));if(ri<config.racesCompleted-1)setExpR(ri+1);else setExpR(null)};
+  const clrRes=(si,ri)=>setSailors(p=>p.map((s,i)=>{if(i!==si)return s;const nr=[...s.results];nr[ri]=null;return{...s,results:nr}}));
+
+  // Compute standings
+  const standings=useMemo(()=>{
+    const scored=mySailors.map(s=>{
+      const sc=calcNet(s.results,penScore,config.racesCompleted,1);
+      const qualScore=sc.net+s.prelimRank; // SI 6.11.2.2c/d: race scores + carried prelim rank
+      return{...s,...sc,qualScore};
+    });
+    scored.sort((a,b)=>a.qualScore-b.qualScore);
+    return scored.map((s,i)=>({...s,elimRank:i+1}));
+  },[mySailors,config,penScore]);
+
+  const inputS={padding:"10px 12px",borderRadius:6,border:"1px solid "+C.border,background:C.surface,color:C.text,fontSize:14};
+
+  return<div style={{display:"flex",flexDirection:"column",gap:16}}>
+    <Card><SectionTitle>Elimination Series Config</SectionTitle>
+      <NumberStepper label="Gold Fleet Size" value={config.goldFleetSize} onChange={v=>setConfig(c=>({...c,goldFleetSize:v}))} min={10} max={200}/>
+      <NumberStepper label="Total Races" value={config.totalRaces} onChange={v=>setConfig(c=>({...c,totalRaces:v}))} min={1} max={10}/>
+      <NumberStepper label="Races Completed" value={config.racesCompleted} onChange={v=>setConfig(c=>({...c,racesCompleted:Math.min(v,config.totalRaces)}))} min={0} max={config.totalRaces}/>
+      <div style={{marginTop:8,display:"flex",gap:12,flexWrap:"wrap",fontSize:11,color:C.textMuted}}>
+        <span>Pen: {penScore}</span><span>Disc: {config.racesCompleted>=3?"1":"0"}</span><span>Finals: top {finalsTop}</span><span>Prelim rank carries forward</span>
+      </div>
+    </Card>
+
+    <Card highlight><SectionTitle>Top 10 Finals Cutoff Estimate</SectionTitle>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:12}}>
+        {[{v:estOptimistic,l:"COMFORTABLE",c:C.green},{v:estTotalCutoff,l:"PROJECTED",c:C.primary,hl:true},{v:estPessimistic,l:"TIGHT",c:C.amber}].map((x,i)=>
+          <div key={i} style={{background:C.surface,borderRadius:6,padding:"10px 8px",textAlign:"center",border:x.hl?"1px solid "+C.primary+"33":"none"}}>
+            <div style={{fontFamily:mono,fontSize:20,fontWeight:700,color:x.c}}>{x.v}</div>
+            <div style={{fontFamily:sans,fontSize:10,color:C.textMuted,marginTop:2}}>{x.l}</div></div>)}
+      </div>
+      <div style={{fontSize:12,color:C.textDim,lineHeight:1.6}}>
+        Qualification score = <b style={{color:C.amber}}>elim net</b> + <b style={{color:C.primary}}>prelim rank</b> (non-discardable)<br/>
+        Target avg finish: <b style={{color:C.white}}>~{ordinal(estAvgFinish)}</b> / {config.goldFleetSize} per race ({config.totalRaces>=3?"1 discard":"no discard"})
+      </div>
+    </Card>
+
+    <Card>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><SectionTitle>Sailors</SectionTitle><Badge>{mySailors.length}</Badge></div>
+      <div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}}>
+        <input placeholder="Name" value={newName} onChange={e=>setNewName(e.target.value)} style={{...inputS,fontFamily:sans,flex:"2 1 120px"}} onKeyDown={e=>e.key==="Enter"&&addS()}/>
+        <input placeholder="Prelim Rank" value={newPrelimRank} onChange={e=>setNewPrelimRank(e.target.value.replace(/[^0-9]/g,""))} style={{...inputS,fontFamily:mono,flex:"1 1 80px",textAlign:"center"}} onKeyDown={e=>e.key==="Enter"&&addS()}/>
+        <button onClick={addS} style={{padding:"10px 16px",borderRadius:6,border:"none",background:C.primary,color:C.bg,fontFamily:sans,fontSize:14,fontWeight:700,cursor:"pointer"}}>+</button>
+      </div>
+      <div style={{fontSize:11,color:C.textMuted,marginBottom:12}}>Enter sailor name + their prelim series rank (carries forward as non-discardable points per SI 6.11.2.1c)</div>
+
+      {/* Standings table if multiple sailors */}
+      {standings.length>1&&config.racesCompleted>0&&<div style={{overflowX:"auto",marginBottom:12}}>
+        <table style={{fontFamily:mono,fontSize:12}}>
+          <thead><tr style={{borderBottom:"2px solid "+C.border}}>
+            <th style={{color:C.textDim,fontSize:10,textAlign:"center"}}>#</th>
+            <th style={{color:C.textDim,fontSize:10,textAlign:"left"}}>Sailor</th>
+            <th style={{color:C.amber,fontSize:10,textAlign:"center"}}>P.Rank</th>
+            <th style={{color:C.textDim,fontSize:10,textAlign:"center"}}>E.Net</th>
+            <th style={{color:C.primary,fontSize:10,textAlign:"center",fontWeight:700}}>Qual</th>
+            <th style={{fontSize:10,textAlign:"center"}}></th>
+          </tr></thead>
+          <tbody>{standings.map((s,i)=>{
+            const inTop10=s.elimRank<=finalsTop;
+            return<tr key={i} style={{borderBottom:"1px solid "+C.border+"22",background:inTop10?C.green+"08":"transparent"}}>
+              <td style={{textAlign:"center",color:inTop10?C.green:C.textDim,fontWeight:700}}>{s.elimRank}</td>
+              <td style={{textAlign:"left",color:C.white,fontFamily:sans,fontSize:13}}>{s.name}</td>
+              <td style={{textAlign:"center",color:C.amber}}>{s.prelimRank}</td>
+              <td style={{textAlign:"center",color:C.textDim}}>{s.net}</td>
+              <td style={{textAlign:"center",color:C.primary,fontWeight:700}}>{s.qualScore}</td>
+              <td style={{textAlign:"center"}}>{inTop10?<Badge color={C.green}>F</Badge>:""}</td>
+            </tr>})}</tbody>
+        </table>
+        <div style={{fontSize:11,color:C.textMuted,marginTop:6}}>Qual = Elim Net + Prelim Rank • <span style={{color:C.green}}>F</span> = Finals qualified</div>
+      </div>}
+
+      {/* Sailor cards */}
+      {mySailors.map((sailor,si)=>{
+        const st=standings.find(s=>s.name===sailor.name&&s.prelimRank===sailor.prelimRank);
+        const sc=st||{net:0,qualScore:sailor.prelimRank,discIdx:[]};
+        const filled=sailor.results.filter(r=>r!=null).length;
+        const isE=expS===si;
+        const rL=config.totalRaces-config.racesCompleted;
+        const pR=estTotalCutoff-sc.qualScore;
+        const aN=rL>0?Math.ceil(Math.max(0,pR)/rL):0;
+        const inTop10=st&&st.elimRank<=finalsTop;
+
+        return<div key={si} style={{marginBottom:8}}><Card style={{padding:0,overflow:"hidden"}}>
+          <div onClick={()=>{setExpS(isE?null:si);setExpR(null)}} style={{padding:"14px 16px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <span style={{fontFamily:sans,fontSize:14,color:C.white,fontWeight:600}}>{sailor.name}</span>
+              <Badge color={C.amber}>P{sailor.prelimRank}</Badge>
+              <Badge color={C.textDim}>{filled}/{config.racesCompleted}R</Badge>
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:12}}>
+              {filled>0&&<><div style={{textAlign:"right"}}>
+                <div style={{fontFamily:mono,fontSize:16,fontWeight:700,color:C.primary}}>{sc.qualScore}</div>
+                <div style={{fontFamily:sans,fontSize:9,color:C.textMuted}}>QUAL</div></div>
+                {inTop10?<Badge color={C.green}>FINALS</Badge>:<StatusBadge net={sc.qualScore} optimistic={estOptimistic} expected={estTotalCutoff} pessimistic={estPessimistic}/>}
+              </>}
+              <span style={{color:C.textMuted,fontSize:12}}>{isE?"▲":"▼"}</span></div>
+          </div>
+          {isE&&<div style={{borderTop:"1px solid "+C.border}}>
+            {filled>0&&<div style={{padding:"12px 16px",display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+              <div style={{padding:"6px 10px",borderRadius:6,background:C.amber+"15",border:"1px solid "+C.amber+"33",textAlign:"center"}}>
+                <div style={{fontFamily:sans,fontSize:9,color:C.amber}}>P.RANK</div>
+                <div style={{fontFamily:mono,fontSize:14,fontWeight:700,color:C.amber}}>{sailor.prelimRank}</div></div>
+              {Array.from({length:config.racesCompleted},(_,ri)=>{const r=sailor.results[ri];const isD=sc.discIdx.includes(ri);
+                return<div key={ri} style={{padding:"6px 10px",borderRadius:6,background:isD?C.amber+"15":C.surface,border:"1px solid "+(isD?C.amber+"44":C.border),textAlign:"center",minWidth:40}}>
+                  <div style={{fontFamily:sans,fontSize:9,color:C.textMuted}}>R{ri+1}</div>
+                  <div style={{fontFamily:mono,fontSize:14,fontWeight:700,color:r==null?C.textMuted:isPen(r)?C.red:isD?C.amber:C.white,textDecoration:isD?"line-through":"none"}}>{r??"-"}</div></div>})}
+              <div style={{padding:"6px 10px",borderRadius:6,background:C.surface,border:"1px solid "+C.border,textAlign:"center"}}>
+                <div style={{fontFamily:sans,fontSize:9,color:C.textDim}}>E.NET</div>
+                <div style={{fontFamily:mono,fontSize:14,fontWeight:700,color:C.textDim}}>{sc.net}</div></div>
+              <div style={{padding:"2px 6px",fontSize:16,color:C.textMuted}}>=</div>
+              <div style={{padding:"6px 10px",borderRadius:6,background:C.primary+"15",border:"1px solid "+C.primary+"33",textAlign:"center"}}>
+                <div style={{fontFamily:sans,fontSize:9,color:C.primary}}>QUAL</div>
+                <div style={{fontFamily:mono,fontSize:14,fontWeight:700,color:C.primary}}>{sc.qualScore}</div></div>
+            </div>}
+
+            {rL>0&&filled>0&&<div style={{padding:"8px 16px",background:C.surface,borderTop:"1px solid "+C.border+"22"}}>
+              {pR<=0?<div style={{fontSize:12,color:C.green}}>✓ Under projected finals cutoff — looking good for top 10</div>:
+              <div style={{fontSize:12,color:C.textDim}}>Need <b style={{color:C.white}}>{pR} pts</b> in <b style={{color:C.white}}>{rL} races</b> → avg <b style={{color:aN<=estAvgFinish?C.green:C.amber}}>{ordinal(aN)}</b> or better</div>}
+            </div>}
+
+            <div style={{padding:"12px 16px"}}>{Array.from({length:config.racesCompleted},(_,ri)=>{
+              const result=sailor.results[ri];const isRE=expR===ri;
+              return<div key={ri} style={{marginBottom:4}}>
+                <div onClick={()=>setExpR(isRE?null:ri)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 12px",borderRadius:6,cursor:"pointer",background:isRE?C.surface:"transparent",border:"1px solid "+(isRE?C.border:"transparent")}}>
+                  <span style={{color:C.textDim,fontFamily:mono,fontSize:13}}>R{ri+1}</span>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    {result!=null?<><span style={{fontFamily:mono,fontSize:16,fontWeight:700,color:isPen(result)?C.red:C.white}}>{isPen(result)?result:ordinal(result)}</span><button onClick={e=>{e.stopPropagation();clrRes(si,ri)}} style={{background:"none",border:"none",color:C.textMuted,cursor:"pointer",fontSize:12}}>✕</button></>:<span style={{color:C.textMuted,fontSize:12}}>tap</span>}
+                    <span style={{color:C.textMuted,fontSize:10}}>{isRE?"▲":"▼"}</span></div>
+                </div>
+                {isRE&&<div style={{padding:"8px 12px"}}><PosGrid fleetSize={config.goldFleetSize} result={result} onSet={v=>setRes(si,ri,v)} onClear={()=>clrRes(si,ri)}/></div>}
+              </div>})}</div>
+            <div style={{padding:"8px 16px 12px",display:"flex",justifyContent:"flex-end"}}><button onClick={()=>remS(si)} style={{background:"none",border:"1px solid "+C.red+"44",borderRadius:6,color:C.red,fontSize:11,padding:"6px 12px",cursor:"pointer"}}>Remove</button></div>
+          </div>}
+        </Card></div>})}
+      {!mySailors.length&&<div style={{color:C.textMuted,textAlign:"center",padding:20,fontSize:13}}>Add sailors with their prelim rank to track elimination</div>}
+    </Card>
+  </div>;
+}
+
+// ═══════════════════════════════════════
+// FINALS ENTRY VIEW
+// ═══════════════════════════════════════
+function FinalsEntryView({sailors,setSailors,focusIdx,setFocusIdx,finalsFleet,setFinalsFleet}){
+  const [nn,setNN]=useState(""),[nr,setNR]=useState(""),[nnet,setNNet]=useState("");
+  const is={padding:"10px 12px",borderRadius:6,border:"1px solid "+C.border,background:C.surface,color:C.text,fontSize:14,fontFamily:sans};
+  const add=()=>{if(!nn.trim()||!nr||!nnet)return;setSailors(p=>[...p,{name:nn.trim(),qualRank:Number(nr),qualNet:Number(nnet),f1:null,f2:null}]);setNN("");setNR("");setNNet("")};
+  const upF=(i,f,v)=>setSailors(p=>p.map((s,j)=>j===i?{...s,[f]:v===""?null:(isPen(v)?v.toUpperCase():Number(v))}:s));
+  const rem=(i)=>{setSailors(p=>p.filter((_,j)=>j!==i));if(focusIdx===i)setFocusIdx(null);else if(focusIdx>i)setFocusIdx(focusIdx-1)};
+  return<div style={{display:"flex",flexDirection:"column",gap:16}}>
+    <Card><SectionTitle>Finals Config</SectionTitle><NumberStepper label="Boats in Finals" value={finalsFleet} onChange={v=>setFinalsFleet(v)} min={2} max={20}/><div style={{fontSize:11,color:C.textMuted}}>Penalty = {finalsFleet+1} (SI 6.5.3)</div></Card>
+    <Card><SectionTitle>Qualification → Finals</SectionTitle>
+      <div style={{fontSize:11,color:C.textMuted,marginBottom:12}}>Enter each finalist's qual rank + net. SI 7.1.7 compression applied automatically.</div>
+      <div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}}>
+        <input placeholder="Name" value={nn} onChange={e=>setNN(e.target.value)} style={{...is,flex:"2 1 120px"}} onKeyDown={e=>e.key==="Enter"&&add()}/>
+        <input placeholder="Rank" value={nr} onChange={e=>setNR(e.target.value.replace(/[^0-9]/g,""))} style={{...is,flex:"1 1 50px",fontFamily:mono,textAlign:"center"}} onKeyDown={e=>e.key==="Enter"&&add()}/>
+        <input placeholder="Net" value={nnet} onChange={e=>setNNet(e.target.value.replace(/[^0-9]/g,""))} style={{...is,flex:"1 1 60px",fontFamily:mono,textAlign:"center"}} onKeyDown={e=>e.key==="Enter"&&add()}/>
+        <button onClick={add} style={{padding:"10px 16px",borderRadius:6,border:"none",background:C.primary,color:C.bg,fontFamily:sans,fontSize:14,fontWeight:700,cursor:"pointer"}}>+</button>
+      </div>
+      {sailors.length>0&&<div style={{overflowX:"auto"}}><table style={{fontFamily:mono,fontSize:13}}>
+        <thead><tr style={{borderBottom:"2px solid "+C.border}}>
+          <th style={{color:C.textDim,textAlign:"left",fontSize:11}}>★</th><th style={{color:C.textDim,textAlign:"center",fontSize:11}}>QR</th><th style={{color:C.textDim,textAlign:"left",fontSize:11}}>Name</th><th style={{color:C.textDim,textAlign:"center",fontSize:11}}>QNet</th><th style={{color:C.primary,textAlign:"center",fontSize:11}}>F1</th><th style={{color:C.primary,textAlign:"center",fontSize:11}}>F2</th><th></th>
+        </tr></thead>
+        <tbody>{sailors.map((s,i)=>{const iF=focusIdx===i;return<tr key={i} style={{borderBottom:"1px solid "+C.border+"22",background:iF?C.primary+"0c":"transparent"}}>
+          <td style={{cursor:"pointer",padding:"10px 4px"}} onClick={()=>setFocusIdx(iF?null:i)}><span style={{color:iF?C.primary:C.textMuted,fontSize:14}}>{iF?"★":"☆"}</span></td>
+          <td style={{textAlign:"center",color:C.textDim}}>{s.qualRank}</td>
+          <td style={{textAlign:"left",color:C.white,fontFamily:sans,fontWeight:iF?700:400}}>{s.name}</td>
+          <td style={{textAlign:"center",color:C.textDim}}>{s.qualNet}</td>
+          <td style={{textAlign:"center",padding:"4px 2px"}}><input value={s.f1??""} onChange={e=>upF(i,"f1",e.target.value)} style={{width:44,padding:"6px 4px",borderRadius:4,border:"1px solid "+C.border,background:C.surface,color:isPen(s.f1)?C.red:C.white,fontFamily:mono,fontSize:14,textAlign:"center",fontWeight:700}}/></td>
+          <td style={{textAlign:"center",padding:"4px 2px"}}><input value={s.f2??""} onChange={e=>upF(i,"f2",e.target.value)} style={{width:44,padding:"6px 4px",borderRadius:4,border:"1px solid "+C.border,background:C.surface,color:isPen(s.f2)?C.red:C.white,fontFamily:mono,fontSize:14,textAlign:"center",fontWeight:700}}/></td>
+          <td><button onClick={()=>rem(i)} style={{background:"none",border:"none",color:C.red,cursor:"pointer",fontSize:14}}>✕</button></td>
+        </tr>})}</tbody>
+      </table></div>}
+      {focusIdx!=null&&<div style={{marginTop:8,padding:8,borderRadius:6,background:C.primary+"0a",border:"1px solid "+C.primary+"22"}}><span style={{color:C.primary,fontSize:12}}>★ Focus: {sailors[focusIdx]?.name}</span></div>}
+    </Card>
+  </div>;
+}
+
+// ═══════════════════════════════════════
+// STANDINGS + ADVISOR (same as before)
+// ═══════════════════════════════════════
+function StandingsView({standings,sailors,focusIdx}){
+  if(!sailors.length)return<Card><div style={{color:C.textMuted,textAlign:"center",padding:40}}>Add sailors in Finals tab</div></Card>;
+  const hF1=sailors.some(s=>s.f1!=null),hF2=sailors.some(s=>s.f2!=null);
+  return<Card><SectionTitle>SI 7.1.7 Compression + Finals</SectionTitle>
+    <div style={{overflowX:"auto"}}><table style={{fontFamily:mono,fontSize:13}}>
+      <thead><tr style={{borderBottom:"2px solid "+C.border}}>
+        <th style={{color:C.textDim,fontSize:11,textAlign:"center"}}>#</th><th style={{color:C.textDim,fontSize:11,textAlign:"left"}}>Sailor</th><th style={{color:C.textDim,fontSize:11,textAlign:"center"}}>QNet</th><th style={{color:C.amber,fontSize:11,textAlign:"center"}}>Adj</th>
+        {hF1&&<th style={{color:C.primary,fontSize:11,textAlign:"center"}}>F1</th>}{hF2&&<th style={{color:C.primary,fontSize:11,textAlign:"center"}}>F2</th>}
+        <th style={{color:C.green,fontSize:11,textAlign:"center"}}>Tot</th>
+      </tr></thead>
+      <tbody>{standings.map(s=>{const iF=sailors.findIndex(x=>x.name===s.name&&x.qualRank===s.qualRank)===focusIdx;const co=s.adjustedNet!==s.qualNet;return<tr key={s.name+s.qualRank} style={{borderBottom:"1px solid "+C.border+"22",background:iF?C.primary+"0c":"transparent"}}>
+        <td style={{textAlign:"center",color:C.primary,fontWeight:700}}>{s.rank}</td>
+        <td style={{textAlign:"left",color:C.white,fontFamily:sans,fontWeight:iF?700:400}}>{iF&&<span style={{color:C.primary,marginRight:4}}>★</span>}{s.name}</td>
+        <td style={{textAlign:"center",color:co?C.textMuted:C.textDim,textDecoration:co?"line-through":"none"}}>{s.qualNet}</td>
+        <td style={{textAlign:"center",color:co?C.amber:C.textDim,fontWeight:co?700:400}}>{s.adjustedNet}</td>
+        {hF1&&<td style={{textAlign:"center",color:isPen(s.f1)?C.red:C.text}}>{s.f1??""}</td>}
+        {hF2&&<td style={{textAlign:"center",color:isPen(s.f2)?C.red:C.text}}>{s.f2??""}</td>}
+        <td style={{textAlign:"center",color:C.green,fontWeight:700}}>{s.overall}</td>
+      </tr>})}</tbody>
+    </table></div>
+    <div style={{display:"flex",gap:14,marginTop:10,flexWrap:"wrap",fontSize:11,color:C.textMuted}}><span><span style={{color:C.amber}}>Adj</span> = SI 7.1.7</span><span>Max 9pt gap • Max 18pt behind 3rd</span></div>
+  </Card>;
+}
+
+function AdvisorView({standings,sailors,focusIdx,finalsFleet,compressed}){
+  const [expR,setExpR]=useState(null);
+  if(focusIdx==null)return<Card><div style={{textAlign:"center",padding:"40px 20px",color:C.textMuted}}><div style={{fontSize:32,marginBottom:12}}>★</div><div>Select a focus sailor in Finals tab</div></div></Card>;
+  const fS=sailors[focusIdx],fC=compressed.find(c=>c.name===fS.name&&c.qualRank===fS.qualRank),fSt=standings.find(c=>c.name===fS.name&&c.qualRank===fS.qualRank);
+  if(!fC||!fSt)return null;
+  const rivals=compressed.filter(c=>!(c.name===fS.name&&c.qualRank===fS.qualRank));
+  const hF1=fS.f1!=null,hF2=fS.f2!=null,proj=!hF1?"F1":(!hF2?"F2":"done");
+  const above=standings.find(s=>s.rank===fSt.rank-1);const gU=above?fSt.overall-above.overall:null;
+  const h2h=useMemo(()=>rivals.map(rival=>{
+    const sc=[];for(let rf=1;rf<=finalsFleet;rf++){let ww=null;for(let mf=finalsFleet;mf>=1;mf--){
+      let m1=hF1?fS.f1:(proj==="F1"?mf:null),m2=hF2?fS.f2:(proj==="F2"?mf:null),r1=rival.f1!=null?rival.f1:(proj==="F1"?rf:null),r2=rival.f2!=null?rival.f2:(proj==="F2"?rf:null);
+      const mO=fC.adjustedNet+(m1!=null?(isPen(m1)?finalsFleet+1:Number(m1)):0)+(m2!=null?(isPen(m2)?finalsFleet+1:Number(m2)):0);
+      const rO=rival.adjustedNet+(r1!=null?(isPen(r1)?finalsFleet+1:Number(r1)):0)+(r2!=null?(isPen(r2)?finalsFleet+1:Number(r2)):0);
+      if(mO<rO||(mO===rO&&fC.qualRank<rival.qualRank)){ww=mf;break;}};sc.push({rf,ww})}
+    let ps=null;{let m1p=hF1?fS.f1:(proj==="F1"?"DNF":null),m2p=hF2?fS.f2:(proj==="F2"?"DNF":null);
+      const myPO=fC.adjustedNet+(m1p!=null?(isPen(m1p)?finalsFleet+1:Number(m1p)):0)+(m2p!=null?(isPen(m2p)?finalsFleet+1:Number(m2p)):0);
+      for(let rf=finalsFleet;rf>=1;rf--){let r1d=rival.f1!=null?rival.f1:(proj==="F1"?rf:null),r2d=rival.f2!=null?rival.f2:(proj==="F2"?rf:null);
+        const rO=rival.adjustedNet+(r1d!=null?(isPen(r1d)?finalsFleet+1:Number(r1d)):0)+(r2d!=null?(isPen(r2d)?finalsFleet+1:Number(r2d)):0);
+        if(rO<myPO||(rO===myPO&&rival.qualRank<fC.qualRank)){ps={rn:rf,mp:myPO};break;}}
+      if(!ps)ps={rn:null,mp:myPO}}
+    return{rival,sc,ps}}),[sailors,compressed,focusIdx,finalsFleet]);
+  return<div style={{display:"flex",flexDirection:"column",gap:12}}>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8}}>
+      {[{l:"Rank",v:fSt.rank,c:C.primary},{l:"Adj",v:fC.adjustedNet,c:C.amber},{l:"Overall",v:fSt.overall,c:C.white},{l:"Gap ↑",v:gU!=null?gU:"—",c:C.green}].map((s,i)=><div key={i} style={{background:C.card,borderRadius:8,padding:"12px 8px",textAlign:"center"}}><div style={{fontFamily:mono,fontSize:22,fontWeight:700,color:s.c}}>{s.v}</div><div style={{fontFamily:sans,fontSize:10,color:C.textMuted,textTransform:"uppercase",marginTop:2}}>{s.l}</div></div>)}
+    </div>
+    {proj!=="done"&&<div style={{padding:"8px 12px",borderRadius:6,background:C.amber+"15",border:"1px solid "+C.amber+"33"}}><span style={{color:C.amber,fontSize:12}}>Projecting: <b>{proj}</b></span></div>}
+    {proj!=="done"&&<Card><SectionTitle>Your {proj} Projections</SectionTitle>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(70px,1fr))",gap:6}}>
+        {[1,2,3,5,Math.ceil(finalsFleet/2),finalsFleet,"PEN"].map(f=>{const fs=f==="PEN"?finalsFleet+1:(typeof f==='number'?f:0);const p=fC.adjustedNet+(hF1?(isPen(fS.f1)?finalsFleet+1:Number(fS.f1)):proj==="F1"?fs:0)+(hF2?(isPen(fS.f2)?finalsFleet+1:Number(fS.f2)):proj==="F2"?fs:0);return<div key={String(f)} style={{background:C.surface,borderRadius:6,padding:8,textAlign:"center"}}><div style={{fontFamily:mono,fontSize:11,color:f==="PEN"?C.red:C.textDim,marginBottom:4}}>{f==="PEN"?"PEN":ordinal(f)}</div><div style={{fontFamily:mono,fontSize:15,fontWeight:700,color:C.white}}>{p}</div></div>})}
+      </div></Card>}
+    <SectionTitle>Head-to-Head{proj!=="done"?" ("+proj+")":""}</SectionTitle>
+    {h2h.map(({rival,sc,ps},idx)=>{const rSt=standings.find(s=>s.name===rival.name&&s.qualRank===rival.qualRank);const gap=rSt?(fSt.overall-rSt.overall):0;const isE=expR===idx;const rW=sc.find(s=>s.rf===1);const rM=sc.find(s=>s.rf===Math.ceil(finalsFleet/2));
+      return<Card key={idx} style={{padding:0,overflow:"hidden"}}>
+        <div onClick={()=>setExpR(isE?null:idx)} style={{padding:"14px 16px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}><span style={{fontFamily:mono,fontSize:14,color:C.primary,fontWeight:700}}>Q{rival.qualRank}</span><span style={{fontFamily:sans,fontSize:14,color:C.white,fontWeight:600}}>{rival.name}</span><Badge color={gap<0?C.green:gap>0?C.red:C.amber}>{gap>0?"+":""}{-gap}pts</Badge></div>
+          <span style={{color:C.textMuted,fontSize:12}}>{isE?"▲":"▼"}</span></div>
+        <div style={{padding:"0 16px 12px",fontFamily:sans,fontSize:13,color:C.textDim,lineHeight:1.8}}>
+          {proj!=="done"?<>
+            {gap<=0?<>{rW?.ww!=null?<div>If they win {proj} → you need <b style={{color:C.white}}>{ordinal(rW.ww)} or better</b></div>:<div>If they win → <span style={{color:C.red}}>they beat you regardless</span></div>}</>:
+            <>{rM?.ww!=null?<div>If they get {ordinal(Math.ceil(finalsFleet/2))} → you need <b style={{color:C.white}}>{ordinal(rM.ww)} or better</b></div>:<div>Mid-fleet → <span style={{color:C.green}}>you stay ahead</span></div>}</>}
+            {ps.rn!=null?<div>If you penalty → they need <b style={{color:C.white}}>{ordinal(ps.rn)} or better</b></div>:<div>If you penalty → <span style={{color:C.green}}>still can't pass</span></div>}
+          </>:<div>Finals complete</div>}
+        </div>
+        {isE&&proj!=="done"&&<div style={{padding:"0 16px 16px",borderTop:"1px solid "+C.border}}>
+          <div style={{padding:"12px 0 8px",fontSize:11,color:C.textMuted,textTransform:"uppercase"}}>Full {proj} Matrix</div>
+          <table style={{fontFamily:mono,fontSize:12}}><thead><tr style={{borderBottom:"1px solid "+C.border}}><th style={{color:C.textDim,textAlign:"left",fontSize:10,padding:"6px 8px"}}>They get</th><th style={{color:C.textDim,textAlign:"center",fontSize:10,padding:"6px 8px"}}>You need</th></tr></thead>
+          <tbody>{sc.map((s,i)=>{const ik=[1,3,5,finalsFleet].includes(s.rf);return<tr key={i} style={{borderBottom:"1px solid "+C.border+"11",background:ik?C.surface:"transparent"}}><td style={{padding:"6px 8px",color:C.text}}>{ordinal(s.rf)}</td><td style={{padding:"6px 8px",textAlign:"center",color:s.ww?C.green:C.red,fontWeight:700}}>{s.ww?ordinal(s.ww)+" or better":"Can't beat"}</td></tr>})}</tbody></table>
+        </div>}
+      </Card>})}
+  </div>;
+}
+
+// ═══════════════════════════════════════
+// MAIN APP
+// ═══════════════════════════════════════
+function App(){
+  const [tab,setTab]=useState(0);const [ff,setFF]=useState(10);const [fi,setFI]=useState(null);const [sailors,setSailors]=useState([]);
+  const [prelim,setPrelim]=useState({config:{totalEntries:200,numFleets:3,totalRaces:5,racesCompleted:0},mySailors:[]});
+  const [elim,setElim]=useState({config:{goldFleetSize:67,totalRaces:7,racesCompleted:0},mySailors:[]});
+  const [loaded,setLoaded]=useState(false);
+  useEffect(()=>{const d=load();if(d){if(d.sailors)setSailors(d.sailors);if(d.focusIdx!=null)setFI(d.focusIdx);if(d.finalsFleet)setFF(d.finalsFleet);if(d.prelim)setPrelim(d.prelim);if(d.elim)setElim(d.elim)}setLoaded(true)},[]);
+  useEffect(()=>{if(loaded)save({sailors,focusIdx:fi,finalsFleet:ff,prelim,elim})},[sailors,fi,ff,prelim,elim,loaded]);
+  const compressed=useMemo(()=>compressScores(sailors),[sailors]);
+  const standings=useMemo(()=>{const sc=compressed.map(s=>{const o=calcFinalsOverall(s.adjustedNet,s.f1,s.f2,ff);return{...s,overall:o,f1Score:s.f1!=null?(isPen(s.f1)?ff+1:Number(s.f1)):null,f2Score:s.f2!=null?(isPen(s.f2)?ff+1:Number(s.f2)):null}});
+    sc.sort((a,b)=>{if(a.overall!==b.overall)return a.overall-b.overall;const aF=[a.f1Score,a.f2Score].filter(x=>x!=null).sort((x,y)=>x-y),bF=[b.f1Score,b.f2Score].filter(x=>x!=null).sort((x,y)=>x-y);for(let i=0;i<Math.max(aF.length,bF.length);i++){if((aF[i]??Infinity)!==(bF[i]??Infinity))return(aF[i]??Infinity)-(bF[i]??Infinity)}return a.qualRank-b.qualRank});
+    return sc.map((s,i)=>({...s,rank:i+1}))},[compressed,ff]);
+  const tabs=[{l:"Prelim",i:"🏁"},{l:"Elim",i:"⚔"},{l:"Finals",i:"🏅"},{l:"Table",i:"📊"},{l:"Advisor",i:"🧭"}];
+  return<div style={{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:sans,maxWidth:640,margin:"0 auto"}}>
+    <div style={{padding:"14px 20px 10px",background:"linear-gradient(135deg,"+C.surface+","+C.bg+")",borderBottom:"1px solid "+C.border}}>
+      <div style={{display:"flex",alignItems:"center",gap:10}}><span style={{fontSize:20}}>⛵</span><div><h1 style={{margin:0,fontSize:17,fontWeight:800,color:C.white,letterSpacing:"-0.5px"}}>SGS Regatta Scorer</h1><div style={{fontSize:11,color:C.textMuted,fontFamily:mono}}>Prelim → Elim → Finals • SI 7.1.7</div></div></div>
+    </div>
+    <div style={{display:"flex",borderBottom:"1px solid "+C.border,background:C.surface,position:"sticky",top:0,zIndex:10}}>
+      {tabs.map((t,i)=><button key={i} onClick={()=>setTab(i)} style={{flex:1,padding:"10px 4px",background:tab===i?C.primary+"18":"transparent",border:"none",borderBottom:tab===i?"2px solid "+C.primary:"2px solid transparent",color:tab===i?C.primary:C.textDim,fontFamily:sans,fontSize:10,fontWeight:tab===i?700:500,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:2,letterSpacing:"0.3px",textTransform:"uppercase"}}><span style={{fontSize:14}}>{t.i}</span>{t.l}</button>)}
+    </div>
+    <div style={{padding:16}}>
+      {tab===0&&<PrelimView prelim={prelim} setPrelim={setPrelim}/>}
+      {tab===1&&<ElimView elim={elim} setElim={setElim}/>}
+      {tab===2&&<FinalsEntryView sailors={sailors} setSailors={setSailors} focusIdx={fi} setFocusIdx={setFI} finalsFleet={ff} setFinalsFleet={setFF}/>}
+      {tab===3&&<StandingsView standings={standings} sailors={sailors} focusIdx={fi}/>}
+      {tab===4&&<AdvisorView standings={standings} sailors={sailors} focusIdx={fi} finalsFleet={ff} compressed={compressed}/>}
+    </div>
+  </div>;
+}
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>

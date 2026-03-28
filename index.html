@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>SGS Regatta Scorer</title>
+<title>Regatta Score Tracker</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
@@ -25,7 +25,7 @@ th,td{padding:8px 6px;font-size:13px}
 <div id="root"></div>
 <script type="text/babel">
 const {useState,useEffect,useMemo}=React;
-const C={bg:"#0b1829",surface:"#122038",card:"#19294a",border:"#263d5e",primary:"#00c2e0",amber:"#f0b429",red:"#ef4444",green:"#22c55e",text:"#f0f4f8",textDim:"#7b8fa8",textMuted:"#4a5f78",white:"#fff"};
+const C={bg:"#080f1c",surface:"#101e33",card:"#162540",border:"#1e3352",primary:"#00d4f5",amber:"#f59e0b",red:"#f43f5e",green:"#10b981",violet:"#8b5cf6",rose:"#f472b6",text:"#e8f0fc",textDim:"#7b8fa8",textMuted:"#3d5470",white:"#fff"};
 const mono="'JetBrains Mono',monospace",sans="'Outfit',system-ui,sans-serif";
 const PEN_CODES=["DSQ","UFD","OCS","DNS","DNF","RET","DNC","BFD","DNE","RAF"];
 const isPen=r=>typeof r==="string"&&PEN_CODES.includes((r||"").toUpperCase());
@@ -52,16 +52,18 @@ function compressScores(sailors){
 }
 function calcFinalsOverall(a,f1,f2,ff){return a+(f1!=null?(isPen(f1)?ff+1:Number(f1)):0)+(f2!=null?(isPen(f2)?ff+1:Number(f2)):0);}
 
-const SKEY="sgs-scorer-v5";
-function load(){try{const d=localStorage.getItem(SKEY);return d?JSON.parse(d):null}catch{return null}}
-function save(d){try{localStorage.setItem(SKEY,JSON.stringify(d))}catch(e){}}
+const SKEY="regatta-scorer-v1";
+function genId(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7)}
+function loadAll(){try{const d=localStorage.getItem(SKEY);return d?JSON.parse(d):{events:[]}}catch{return{events:[]}}}
+function saveAll(d){try{localStorage.setItem(SKEY,JSON.stringify(d))}catch(e){}}
+function migrateOld(){try{const o=localStorage.getItem("sgs-scorer-v5");if(!o)return null;const d=JSON.parse(o);return{id:genId(),name:"SGS Regatta (imported)",date:"",created:Date.now(),lastModified:Date.now(),prelim:d.prelim||{config:{totalEntries:200,numFleets:3,totalRaces:5,racesCompleted:0},mySailors:[]},elim:d.elim||{config:{goldFleetSize:67,totalRaces:7,racesCompleted:0},mySailors:[]},sailors:d.sailors||[],finalsFleet:d.finalsFleet||10,focusIdx:null};}catch{return null}}
 
-function Card({children,style,highlight}){return<div style={{background:C.card,borderRadius:8,border:"1px solid "+(highlight?C.primary+"44":C.border),padding:16,...style}}>{children}</div>}
-function Badge({children,color=C.primary}){return<span style={{display:"inline-block",padding:"2px 7px",borderRadius:4,background:color+"22",color,fontSize:11,fontFamily:mono,fontWeight:700}}>{children}</span>}
-function SectionTitle({children}){return<h3 style={{color:C.primary,fontFamily:sans,fontSize:13,margin:"0 0 12px",textTransform:"uppercase",letterSpacing:"1px"}}>{children}</h3>}
+function Card({children,style,highlight,accent}){return<div style={{background:C.card,borderRadius:10,border:"1px solid "+(highlight?C.primary+"55":C.border),padding:16,position:"relative",overflow:"hidden",...style}}>{accent&&<div style={{position:"absolute",left:0,top:0,bottom:0,width:3,background:accent,borderRadius:"10px 0 0 10px"}}/>}{children}</div>}
+function Badge({children,color=C.primary}){return<span style={{display:"inline-block",padding:"2px 8px",borderRadius:20,background:color+"25",color,fontSize:11,fontFamily:mono,fontWeight:700,letterSpacing:"0.3px"}}>{children}</span>}
+function SectionTitle({children,color}){return<h3 style={{color:color||C.primary,fontFamily:sans,fontSize:12,margin:"0 0 12px",textTransform:"uppercase",letterSpacing:"1.5px",fontWeight:700}}>{children}</h3>}
 function NumberStepper({label,value,onChange,min=0,max=999}){
-  const bs={width:36,height:36,borderRadius:6,border:"1px solid "+C.border,background:C.surface,color:C.text,fontSize:18,cursor:"pointer",fontFamily:mono,display:"flex",alignItems:"center",justifyContent:"center"};
-  return<div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 0"}}><span style={{color:C.textDim,fontFamily:sans,fontSize:14}}>{label}</span><div style={{display:"flex",alignItems:"center",gap:8}}><button onClick={()=>onChange(Math.max(min,value-1))} style={bs}>−</button><span style={{fontFamily:mono,fontSize:18,color:C.white,minWidth:32,textAlign:"center",fontWeight:700}}>{value}</span><button onClick={()=>onChange(Math.min(max,value+1))} style={bs}>+</button></div></div>
+  const bs={width:36,height:36,borderRadius:8,border:"1px solid "+C.border,background:C.surface,color:C.primary,fontSize:18,cursor:"pointer",fontFamily:mono,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700};
+  return<div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"9px 0",borderBottom:"1px solid "+C.border+"44"}}><span style={{color:C.text,fontFamily:sans,fontSize:14}}>{label}</span><div style={{display:"flex",alignItems:"center",gap:10}}><button onClick={()=>onChange(Math.max(min,value-1))} style={bs}>−</button><span style={{fontFamily:mono,fontSize:20,color:C.white,minWidth:36,textAlign:"center",fontWeight:800}}>{value}</span><button onClick={()=>onChange(Math.min(max,value+1))} style={bs}>+</button></div></div>
 }
 
 // Position grid for entering results
@@ -107,7 +109,7 @@ function PrelimView({prelim,setPrelim}){
   const clrRes=(si,ri)=>setSailors(p=>p.map((s,i)=>{if(i!==si)return s;const nr=[...s.results];nr[ri]=null;return{...s,results:nr}}));
 
   return<div style={{display:"flex",flexDirection:"column",gap:16}}>
-    <Card><SectionTitle>Preliminary Series Config</SectionTitle>
+    <Card accent={C.primary}><SectionTitle>Preliminary Series Config</SectionTitle>
       <NumberStepper label="Total Entries" value={config.totalEntries} onChange={v=>setConfig(c=>({...c,totalEntries:v}))} min={10} max={400}/>
       <NumberStepper label="Fleets" value={config.numFleets} onChange={v=>setConfig(c=>({...c,numFleets:v}))} min={1} max={4}/>
       <NumberStepper label="Total Races" value={config.totalRaces} onChange={v=>setConfig(c=>({...c,totalRaces:v}))} min={1} max={10}/>
@@ -116,7 +118,7 @@ function PrelimView({prelim,setPrelim}){
         <span>Fleet: ~{est.fs}</span><span>Pen: {est.pen}</span><span>Disc: {config.racesCompleted>=3?"1":"0"}</span><span>Gold: top {est.gs}</span>
       </div>
     </Card>
-    <Card highlight><SectionTitle>Gold Fleet Cutoff</SectionTitle>
+    <Card highlight accent={C.green}><SectionTitle color={C.green}>Gold Fleet Cutoff</SectionTitle>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:12}}>
         {[{v:est.opt,l:"COMFORTABLE",c:C.green},{v:est.exp,l:"PROJECTED",c:C.primary,hl:true},{v:est.pes,l:"TIGHT",c:C.amber}].map((x,i)=>
           <div key={i} style={{background:C.surface,borderRadius:6,padding:"10px 8px",textAlign:"center",border:x.hl?"1px solid "+C.primary+"33":"none"}}>
@@ -223,7 +225,7 @@ function ElimView({elim,setElim}){
   const inputS={padding:"10px 12px",borderRadius:6,border:"1px solid "+C.border,background:C.surface,color:C.text,fontSize:14};
 
   return<div style={{display:"flex",flexDirection:"column",gap:16}}>
-    <Card><SectionTitle>Elimination Series Config</SectionTitle>
+    <Card accent={C.amber}><SectionTitle color={C.amber}>Elimination Series Config</SectionTitle>
       <NumberStepper label="Gold Fleet Size" value={config.goldFleetSize} onChange={v=>setConfig(c=>({...c,goldFleetSize:v}))} min={10} max={200}/>
       <NumberStepper label="Total Races" value={config.totalRaces} onChange={v=>setConfig(c=>({...c,totalRaces:v}))} min={1} max={10}/>
       <NumberStepper label="Races Completed" value={config.racesCompleted} onChange={v=>setConfig(c=>({...c,racesCompleted:Math.min(v,config.totalRaces)}))} min={0} max={config.totalRaces}/>
@@ -232,7 +234,7 @@ function ElimView({elim,setElim}){
       </div>
     </Card>
 
-    <Card highlight><SectionTitle>Top 10 Finals Cutoff Estimate</SectionTitle>
+    <Card highlight accent={C.violet}><SectionTitle color={C.violet}>Top 10 Finals Cutoff Estimate</SectionTitle>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:12}}>
         {[{v:estOptimistic,l:"COMFORTABLE",c:C.green},{v:estTotalCutoff,l:"PROJECTED",c:C.primary,hl:true},{v:estPessimistic,l:"TIGHT",c:C.amber}].map((x,i)=>
           <div key={i} style={{background:C.surface,borderRadius:6,padding:"10px 8px",textAlign:"center",border:x.hl?"1px solid "+C.primary+"33":"none"}}>
@@ -357,8 +359,8 @@ function FinalsEntryView({sailors,setSailors,focusIdx,setFocusIdx,finalsFleet,se
   const upF=(i,f,v)=>setSailors(p=>p.map((s,j)=>j===i?{...s,[f]:v===""?null:(isPen(v)?v.toUpperCase():Number(v))}:s));
   const rem=(i)=>{setSailors(p=>p.filter((_,j)=>j!==i));if(focusIdx===i)setFocusIdx(null);else if(focusIdx>i)setFocusIdx(focusIdx-1)};
   return<div style={{display:"flex",flexDirection:"column",gap:16}}>
-    <Card><SectionTitle>Finals Config</SectionTitle><NumberStepper label="Boats in Finals" value={finalsFleet} onChange={v=>setFinalsFleet(v)} min={2} max={20}/><div style={{fontSize:11,color:C.textMuted}}>Penalty = {finalsFleet+1} (SI 6.5.3)</div></Card>
-    <Card><SectionTitle>Qualification → Finals</SectionTitle>
+    <Card accent={C.green}><SectionTitle color={C.green}>Finals Config</SectionTitle><NumberStepper label="Boats in Finals" value={finalsFleet} onChange={v=>setFinalsFleet(v)} min={2} max={20}/><div style={{fontSize:11,color:C.textMuted}}>Penalty = {finalsFleet+1} (SI 6.5.3)</div></Card>
+    <Card accent={C.green}><SectionTitle color={C.green}>Qualification → Finals</SectionTitle>
       <div style={{fontSize:11,color:C.textMuted,marginBottom:12}}>Enter each finalist's qual rank + net. SI 7.1.7 compression applied automatically.</div>
       <div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}}>
         <input placeholder="Name" value={nn} onChange={e=>setNN(e.target.value)} style={{...is,flex:"2 1 120px"}} onKeyDown={e=>e.key==="Enter"&&add()}/>
@@ -391,7 +393,7 @@ function FinalsEntryView({sailors,setSailors,focusIdx,setFocusIdx,finalsFleet,se
 function StandingsView({standings,sailors,focusIdx}){
   if(!sailors.length)return<Card><div style={{color:C.textMuted,textAlign:"center",padding:40}}>Add sailors in Finals tab</div></Card>;
   const hF1=sailors.some(s=>s.f1!=null),hF2=sailors.some(s=>s.f2!=null);
-  return<Card><SectionTitle>SI 7.1.7 Compression + Finals</SectionTitle>
+  return<Card accent={C.violet}><SectionTitle color={C.violet}>SI 7.1.7 Compression + Finals</SectionTitle>
     <div style={{overflowX:"auto"}}><table style={{fontFamily:mono,fontSize:13}}>
       <thead><tr style={{borderBottom:"2px solid "+C.border}}>
         <th style={{color:C.textDim,fontSize:11,textAlign:"center"}}>#</th><th style={{color:C.textDim,fontSize:11,textAlign:"left"}}>Sailor</th><th style={{color:C.textDim,fontSize:11,textAlign:"center"}}>QNet</th><th style={{color:C.amber,fontSize:11,textAlign:"center"}}>Adj</th>
@@ -465,26 +467,104 @@ function AdvisorView({standings,sailors,focusIdx,finalsFleet,compressed}){
 }
 
 // ═══════════════════════════════════════
-// MAIN APP
+// EVENTS HOME
 // ═══════════════════════════════════════
-function App(){
-  const [tab,setTab]=useState(0);const [ff,setFF]=useState(10);const [fi,setFI]=useState(null);const [sailors,setSailors]=useState([]);
-  const [prelim,setPrelim]=useState({config:{totalEntries:200,numFleets:3,totalRaces:5,racesCompleted:0},mySailors:[]});
-  const [elim,setElim]=useState({config:{goldFleetSize:67,totalRaces:7,racesCompleted:0},mySailors:[]});
-  const [loaded,setLoaded]=useState(false);
-  useEffect(()=>{const d=load();if(d){if(d.sailors)setSailors(d.sailors);if(d.focusIdx!=null)setFI(d.focusIdx);if(d.finalsFleet)setFF(d.finalsFleet);if(d.prelim)setPrelim(d.prelim);if(d.elim)setElim(d.elim)}setLoaded(true)},[]);
-  useEffect(()=>{if(loaded)save({sailors,focusIdx:fi,finalsFleet:ff,prelim,elim})},[sailors,fi,ff,prelim,elim,loaded]);
+function EventsHome({events,onOpen,onCreate,onDelete}){
+  const [showNew,setShowNew]=useState(false);
+  const [newName,setNewName]=useState("");
+  const [newDate,setNewDate]=useState("");
+  const doCreate=()=>{if(!newName.trim())return;onCreate(newName.trim(),newDate);setShowNew(false);setNewName("");setNewDate("")};
+  const sorted=[...events].sort((a,b)=>b.lastModified-a.lastModified);
+  return<div style={{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:sans,maxWidth:640,margin:"0 auto"}}>
+    <div style={{padding:"24px 20px 20px",background:"linear-gradient(160deg,#0d2040 0%,#0a1628 40%,#080f1c 100%)",borderBottom:"1px solid "+C.border,position:"relative",overflow:"hidden"}}>
+      <div style={{position:"absolute",top:-40,right:-40,width:160,height:160,borderRadius:"50%",background:"radial-gradient(circle,"+C.primary+"18 0%,transparent 70%)"}}/>
+      <div style={{position:"absolute",bottom:-30,left:60,width:120,height:120,borderRadius:"50%",background:"radial-gradient(circle,"+C.violet+"15 0%,transparent 70%)"}}/>
+      <div style={{display:"flex",alignItems:"center",gap:14,position:"relative"}}>
+        <div style={{width:52,height:52,borderRadius:14,background:"linear-gradient(135deg,"+C.primary+"33,"+C.violet+"22)",border:"1px solid "+C.primary+"44",display:"flex",alignItems:"center",justifyContent:"center",fontSize:26}}>⛵</div>
+        <div>
+          <h1 style={{margin:0,fontSize:24,fontWeight:800,color:C.white,letterSpacing:"-0.5px"}}>Regatta Score Tracker</h1>
+          <div style={{fontSize:11,color:C.textDim,fontFamily:mono,marginTop:3}}>Multi-event scoring & projections • SI 7.1.7</div>
+        </div>
+      </div>
+    </div>
+    <div style={{padding:16}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+        <SectionTitle>Your Regattas</SectionTitle>
+        <button onClick={()=>setShowNew(true)} style={{padding:"8px 18px",borderRadius:8,border:"none",background:"linear-gradient(135deg,"+C.primary+","+C.violet+")",color:C.white,fontFamily:sans,fontSize:13,fontWeight:700,cursor:"pointer",boxShadow:"0 2px 12px "+C.primary+"44"}}>+ New Regatta</button>
+      </div>
+      {showNew&&<Card style={{marginBottom:16}} accent={C.primary}>
+        <SectionTitle>New Regatta</SectionTitle>
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          <input autoFocus placeholder="Regatta name (e.g. ISAF Worlds 2025)" value={newName} onChange={e=>setNewName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&doCreate()} style={{padding:"10px 12px",borderRadius:6,border:"1px solid "+C.border,background:C.surface,color:C.text,fontSize:14,fontFamily:sans}}/>
+          <input type="date" value={newDate} onChange={e=>setNewDate(e.target.value)} style={{padding:"10px 12px",borderRadius:6,border:"1px solid "+C.border,background:C.surface,color:C.text,fontSize:14,fontFamily:mono}}/>
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={doCreate} style={{flex:1,padding:"10px",borderRadius:6,border:"none",background:C.primary,color:C.bg,fontFamily:sans,fontSize:14,fontWeight:700,cursor:"pointer"}}>Create</button>
+            <button onClick={()=>{setShowNew(false);setNewName("");setNewDate("")}} style={{padding:"10px 16px",borderRadius:6,border:"1px solid "+C.border,background:"transparent",color:C.textDim,fontFamily:sans,fontSize:14,cursor:"pointer"}}>Cancel</button>
+          </div>
+        </div>
+      </Card>}
+      {sorted.length===0&&!showNew&&<div style={{textAlign:"center",padding:"60px 20px",color:C.textMuted}}>
+        <div style={{width:80,height:80,borderRadius:20,background:"linear-gradient(135deg,"+C.primary+"22,"+C.violet+"15)",border:"1px solid "+C.primary+"33",display:"flex",alignItems:"center",justifyContent:"center",fontSize:36,margin:"0 auto 16px"}}>⛵</div>
+        <div style={{fontSize:17,marginBottom:8,color:C.textDim,fontWeight:700}}>No regattas yet</div>
+        <div style={{fontSize:13}}>Tap <b style={{color:C.primary}}>+ New Regatta</b> to get started</div>
+      </div>}
+      {sorted.map(ev=>{
+        const pCount=(ev.prelim?.mySailors||[]).length,eCount=(ev.elim?.mySailors||[]).length,fCount=(ev.sailors||[]).length;
+        const accent=fCount>0?C.green:eCount>0?C.amber:pCount>0?C.primary:C.border;
+        return<Card key={ev.id} style={{marginBottom:10,cursor:"pointer",paddingLeft:20}} accent={accent}>
+          <div onClick={()=>onOpen(ev.id)} style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:16,fontWeight:700,color:C.white,marginBottom:6}}>{ev.name}</div>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+                {ev.date&&<span style={{fontSize:11,color:C.textMuted,fontFamily:mono}}>{new Date(ev.date+"T00:00:00").toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"})}</span>}
+                {pCount>0&&<Badge color={C.primary}>{pCount} prelim</Badge>}
+                {eCount>0&&<Badge color={C.amber}>{eCount} elim</Badge>}
+                {fCount>0&&<Badge color={C.green}>{fCount} finals</Badge>}
+                {pCount+eCount+fCount===0&&<span style={{fontSize:11,color:C.textMuted}}>Empty — tap to open</span>}
+              </div>
+            </div>
+            <div style={{width:32,height:32,borderRadius:8,background:accent+"22",border:"1px solid "+accent+"33",display:"flex",alignItems:"center",justifyContent:"center",marginLeft:8,flexShrink:0}}>
+              <span style={{color:accent,fontSize:16,fontWeight:700}}>›</span>
+            </div>
+          </div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:10,paddingTop:8,borderTop:"1px solid "+C.border+"44"}}>
+            <span style={{fontSize:11,color:C.textMuted}}>Last edited {new Date(ev.lastModified).toLocaleDateString()}</span>
+            <button onClick={e=>{e.stopPropagation();if(window.confirm("Delete \""+ev.name+"\"? This cannot be undone."))onDelete(ev.id)}} style={{background:"none",border:"1px solid "+C.red+"33",borderRadius:6,color:C.red,fontSize:11,padding:"4px 10px",cursor:"pointer"}}>Delete</button>
+          </div>
+        </Card>})}
+    </div>
+  </div>;
+}
+
+// ═══════════════════════════════════════
+// EVENT VIEW (single regatta)
+// ═══════════════════════════════════════
+function EventView({event,updateEvent,onBack}){
+  const [tab,setTab]=useState(0);
+  const prelim=event.prelim;const elim=event.elim;const sailors=event.sailors||[];const ff=event.finalsFleet||10;const fi=event.focusIdx??null;
+  const setPrelim=(fn)=>updateEvent(e=>({...e,prelim:typeof fn==='function'?fn(e.prelim):fn}));
+  const setElim=(fn)=>updateEvent(e=>({...e,elim:typeof fn==='function'?fn(e.elim):fn}));
+  const setSailors=(fn)=>updateEvent(e=>({...e,sailors:typeof fn==='function'?fn(e.sailors||[]):fn}));
+  const setFF=(v)=>updateEvent(e=>({...e,finalsFleet:v}));
+  const setFI=(v)=>updateEvent(e=>({...e,focusIdx:v}));
   const compressed=useMemo(()=>compressScores(sailors),[sailors]);
   const standings=useMemo(()=>{const sc=compressed.map(s=>{const o=calcFinalsOverall(s.adjustedNet,s.f1,s.f2,ff);return{...s,overall:o,f1Score:s.f1!=null?(isPen(s.f1)?ff+1:Number(s.f1)):null,f2Score:s.f2!=null?(isPen(s.f2)?ff+1:Number(s.f2)):null}});
     sc.sort((a,b)=>{if(a.overall!==b.overall)return a.overall-b.overall;const aF=[a.f1Score,a.f2Score].filter(x=>x!=null).sort((x,y)=>x-y),bF=[b.f1Score,b.f2Score].filter(x=>x!=null).sort((x,y)=>x-y);for(let i=0;i<Math.max(aF.length,bF.length);i++){if((aF[i]??Infinity)!==(bF[i]??Infinity))return(aF[i]??Infinity)-(bF[i]??Infinity)}return a.qualRank-b.qualRank});
     return sc.map((s,i)=>({...s,rank:i+1}))},[compressed,ff]);
-  const tabs=[{l:"Prelim",i:"🏁"},{l:"Elim",i:"⚔"},{l:"Finals",i:"🏅"},{l:"Table",i:"📊"},{l:"Advisor",i:"🧭"}];
+  const tabs=[{l:"Prelim",i:"🏁",c:C.primary},{l:"Elim",i:"⚔",c:C.amber},{l:"Finals",i:"🏅",c:C.green},{l:"Table",i:"📊",c:C.violet},{l:"Advisor",i:"🧭",c:C.rose}];
+  const tabColor=tabs[tab].c;
   return<div style={{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:sans,maxWidth:640,margin:"0 auto"}}>
-    <div style={{padding:"14px 20px 10px",background:"linear-gradient(135deg,"+C.surface+","+C.bg+")",borderBottom:"1px solid "+C.border}}>
-      <div style={{display:"flex",alignItems:"center",gap:10}}><span style={{fontSize:20}}>⛵</span><div><h1 style={{margin:0,fontSize:17,fontWeight:800,color:C.white,letterSpacing:"-0.5px"}}>SGS Regatta Scorer</h1><div style={{fontSize:11,color:C.textMuted,fontFamily:mono}}>Prelim → Elim → Finals • SI 7.1.7</div></div></div>
+    <div style={{padding:"12px 16px 10px",background:"linear-gradient(160deg,#0d2040 0%,"+C.bg+" 100%)",borderBottom:"1px solid "+C.border}}>
+      <div style={{display:"flex",alignItems:"center",gap:10}}>
+        <button onClick={onBack} style={{width:32,height:32,borderRadius:8,background:C.surface,border:"1px solid "+C.border,color:C.textDim,fontSize:18,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,flexShrink:0}}>‹</button>
+        <div style={{flex:1,minWidth:0}}>
+          <h1 style={{margin:0,fontSize:16,fontWeight:800,color:C.white,letterSpacing:"-0.3px",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{event.name}</h1>
+          <div style={{fontSize:10,color:C.textMuted,fontFamily:mono,marginTop:1}}>Prelim → Elim → Finals • SI 7.1.7</div>
+        </div>
+      </div>
     </div>
     <div style={{display:"flex",borderBottom:"1px solid "+C.border,background:C.surface,position:"sticky",top:0,zIndex:10}}>
-      {tabs.map((t,i)=><button key={i} onClick={()=>setTab(i)} style={{flex:1,padding:"10px 4px",background:tab===i?C.primary+"18":"transparent",border:"none",borderBottom:tab===i?"2px solid "+C.primary:"2px solid transparent",color:tab===i?C.primary:C.textDim,fontFamily:sans,fontSize:10,fontWeight:tab===i?700:500,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:2,letterSpacing:"0.3px",textTransform:"uppercase"}}><span style={{fontSize:14}}>{t.i}</span>{t.l}</button>)}
+      {tabs.map((t,i)=><button key={i} onClick={()=>setTab(i)} style={{flex:1,padding:"10px 4px",background:tab===i?t.c+"15":"transparent",border:"none",borderBottom:tab===i?"2px solid "+t.c:"2px solid transparent",color:tab===i?t.c:C.textMuted,fontFamily:sans,fontSize:10,fontWeight:tab===i?700:500,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:2,letterSpacing:"0.3px",textTransform:"uppercase",transition:"color 0.15s"}}><span style={{fontSize:14}}>{t.i}</span>{t.l}</button>)}
     </div>
     <div style={{padding:16}}>
       {tab===0&&<PrelimView prelim={prelim} setPrelim={setPrelim}/>}
@@ -494,6 +574,31 @@ function App(){
       {tab===4&&<AdvisorView standings={standings} sailors={sailors} focusIdx={fi} finalsFleet={ff} compressed={compressed}/>}
     </div>
   </div>;
+}
+
+// ═══════════════════════════════════════
+// MAIN APP
+// ═══════════════════════════════════════
+function App(){
+  const [allData,setAllData]=useState(null);
+  const [activeId,setActiveId]=useState(null);
+  useEffect(()=>{
+    let d=loadAll();
+    if(d.events.length===0){const m=migrateOld();if(m){d={events:[m]};saveAll(d);}}
+    setAllData(d);
+  },[]);
+  useEffect(()=>{if(allData)saveAll(allData);},[allData]);
+  const updateEvent=(fn)=>setAllData(d=>({...d,events:d.events.map(e=>e.id===activeId?{...fn(e),lastModified:Date.now()}:e)}));
+  const createEvent=(name,date)=>{
+    const ev={id:genId(),name,date,created:Date.now(),lastModified:Date.now(),prelim:{config:{totalEntries:200,numFleets:3,totalRaces:5,racesCompleted:0},mySailors:[]},elim:{config:{goldFleetSize:67,totalRaces:7,racesCompleted:0},mySailors:[]},sailors:[],finalsFleet:10,focusIdx:null};
+    setAllData(d=>({...d,events:[...d.events,ev]}));
+    setActiveId(ev.id);
+  };
+  const deleteEvent=(id)=>{setAllData(d=>({...d,events:d.events.filter(e=>e.id!==id)}));if(activeId===id)setActiveId(null)};
+  if(!allData)return null;
+  const activeEvent=allData.events.find(e=>e.id===activeId)||null;
+  if(!activeEvent)return<EventsHome events={allData.events} onOpen={setActiveId} onCreate={createEvent} onDelete={deleteEvent}/>;
+  return<EventView key={activeId} event={activeEvent} updateEvent={updateEvent} onBack={()=>setActiveId(null)}/>;
 }
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 </script>

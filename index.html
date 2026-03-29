@@ -341,10 +341,13 @@ function StatusBadge({net,optimistic,expected,pessimistic}){
   return<Badge color={C.red}>AT RISK</Badge>;
 }
 
-function estimateGoldCutoff(totalEntries,numFleets,totalRaces){
+function estimateGoldCutoff(totalEntries,numFleets,totalRaces,goldFleetSize){
   if(numFleets<=1)return{singleFleet:true,fs:totalEntries,pen:totalEntries+1,totalRaces,hasDisc:totalRaces>=4,cr:totalRaces>=4?totalRaces-1:totalRaces};
-  const gs=Math.ceil(totalEntries/numFleets);const fs=gs;const pen=fs+1;
-  const avg=Math.round(fs/numFleets);const hasDisc=totalRaces>=4;const cr=hasDisc?totalRaces-1:totalRaces;
+  const fs=Math.ceil(totalEntries/numFleets); // per-fleet size
+  const gs=goldFleetSize||Math.ceil(totalEntries/numFleets); // gold fleet cutoff
+  const pen=fs+1;
+  // Bubble sailor finishes around gs/numFleets in their fleet on average
+  const avg=Math.round(gs/numFleets);const hasDisc=totalRaces>=4;const cr=hasDisc?totalRaces-1:totalRaces;
   const effCr=hasDisc?cr-0.5:cr;
   const exp=Math.round(avg*effCr);return{singleFleet:false,gs,fs,pen,avg,cr,exp,opt:Math.round(exp*0.85),pes:Math.round(exp*1.15),totalRaces,hasDisc};
 }
@@ -396,7 +399,8 @@ function PrelimView({prelim,setPrelim,setElim,goToElim}){
       return{...sailor,results:nr};
     }));
   };
-  const est=useMemo(()=>estimateGoldCutoff(config.totalEntries,config.numFleets,config.totalRaces),[config]);
+  const autoGs=Math.ceil(config.totalEntries/config.numFleets);
+  const est=useMemo(()=>estimateGoldCutoff(config.totalEntries,config.numFleets,config.totalRaces,config.goldFleetSize||0),[config]);
   const addS=()=>{if(!newName.trim())return;setSailors(p=>[...p,{name:newName.trim(),results:[]}]);setNewName("")};
   const remS=(i)=>setSailors(p=>p.filter((_,j)=>j!==i));
   const setRes=(si,ri,val)=>{setSailors(p=>p.map((s,i)=>{if(i!==si)return s;const nr=[...s.results];while(nr.length<=ri)nr.push(null);nr[ri]=val;return{...s,results:nr}}));if(ri<config.racesCompleted-1)setExpR(ri+1);else setExpR(null)};
@@ -406,12 +410,18 @@ function PrelimView({prelim,setPrelim,setElim,goToElim}){
     <Card accent={C.primary}><SectionTitle>Preliminary Series Config</SectionTitle>
       <NumberStepper label="Total Entries" value={config.totalEntries} onChange={v=>setConfig(c=>({...c,totalEntries:v}))} min={10} max={400}/>
       <NumberStepper label="Fleets" value={config.numFleets} onChange={v=>setConfig(c=>({...c,numFleets:v}))} min={1} max={4}/>
+      {config.numFleets>1&&<NumberStepper
+        label={<span>Gold Fleet Size{!config.goldFleetSize&&<span style={{marginLeft:6,fontSize:11,color:C.textMuted,fontFamily:mono,fontWeight:400}}>auto</span>}</span>}
+        value={config.goldFleetSize||autoGs}
+        onChange={v=>setConfig(c=>({...c,goldFleetSize:v===autoGs?0:v}))}
+        min={2} max={config.totalEntries}
+      />}
       <NumberStepper label="Total Races" value={config.totalRaces} onChange={v=>setConfig(c=>({...c,totalRaces:v}))} min={1} max={10}/>
       <NumberStepper label="Races Completed" value={config.racesCompleted} onChange={v=>setConfig(c=>({...c,racesCompleted:Math.min(v,config.totalRaces)}))} min={0} max={config.totalRaces}/>
       <div style={{marginTop:8,display:"flex",gap:12,flexWrap:"wrap",fontSize:11,color:C.textMuted}}>
         {est.singleFleet
           ?<span style={{color:C.amber}}>Single fleet — all {config.totalEntries} boats race together, no gold/silver split</span>
-          :<><span>Fleet: ~{est.fs}</span><span>Pen: {est.pen}</span><span>Disc: {config.racesCompleted>=4?"1":"0"}</span><span>Gold: top {est.gs}</span></>}
+          :<><span>Fleet size: ~{est.fs}</span><span>Pen: {est.pen}</span><span>Disc: {config.racesCompleted>=4?"1":"0"}</span><span style={{color:C.green,fontWeight:700}}>Gold: top {est.gs}</span></>}
       </div>
     </Card>
     {!est.singleFleet&&<Card highlight accent={C.green}><SectionTitle color={C.green}>Gold Fleet Cutoff</SectionTitle>
@@ -1014,7 +1024,7 @@ function App(){
   useEffect(()=>{if(allData)saveAll(allData);},[allData]);
   const updateEvent=(fn)=>setAllData(d=>({...d,events:d.events.map(e=>e.id===activeId?{...fn(e),lastModified:Date.now()}:e)}));
   const createEvent=(name,date)=>{
-    const ev={id:genId(),name,date,created:Date.now(),lastModified:Date.now(),prelim:{config:{totalEntries:200,numFleets:3,totalRaces:5,racesCompleted:0},mySailors:[]},elim:{config:{goldFleetSize:67,totalRaces:7,racesCompleted:0},mySailors:[]},sailors:[],finalsFleet:10,focusIdx:null};
+    const ev={id:genId(),name,date,created:Date.now(),lastModified:Date.now(),prelim:{config:{totalEntries:200,numFleets:3,totalRaces:5,racesCompleted:0,goldFleetSize:0},mySailors:[]},elim:{config:{goldFleetSize:67,totalRaces:7,racesCompleted:0},mySailors:[]},sailors:[],finalsFleet:10,focusIdx:null};
     setAllData(d=>({...d,events:[...d.events,ev]}));
     setActiveId(ev.id);
   };

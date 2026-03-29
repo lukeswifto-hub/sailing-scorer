@@ -917,7 +917,7 @@ function EventView({event,updateEvent,onBack}){
     {id:1,l:"Elimination",short:"Elim",i:"⚔",c:C.amber,always:false},
     {id:2,l:"Finals",short:"Finals",i:"🏅",c:C.green,always:false},
     {id:3,l:"Standings",short:"Table",i:"📊",c:C.violet,always:false},
-    {id:4,l:"Advisor",short:"Advise",i:"🧭",c:C.rose,always:false}
+    {id:4,l:"Advisor",short:"Advise",i:"🧭",c:C.rose,always:true}
   ];
   const tabs=allTabs.filter(t=>t.always||!singleFleet);
   const validTab=tabs.find(t=>t.id===tab)?tab:0;

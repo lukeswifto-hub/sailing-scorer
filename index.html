@@ -37,7 +37,7 @@ function calcNet(results,penScore,racesCompleted,numDiscards){
   const valid=results.slice(0,racesCompleted).map((r,i)=>({i,score:r==null?null:(isPen(r)?penScore:Number(r))})).filter(s=>s.score!=null);
   if(!valid.length)return{net:0,total:0,discIdx:[]};
   const total=valid.reduce((s,x)=>s+x.score,0);
-  const nd=racesCompleted>=4?numDiscards:0;
+  const nd=racesCompleted>=3?numDiscards:0;
   const sorted=[...valid].sort((a,b)=>b.score-a.score);
   const discIdx=sorted.slice(0,Math.min(nd,valid.length)).map(s=>s.i);
   const net=total-discIdx.reduce((s,i)=>s+valid.find(v=>v.i===i).score,0);
@@ -342,14 +342,19 @@ function StatusBadge({net,optimistic,expected,pessimistic}){
 }
 
 function estimateGoldCutoff(totalEntries,numFleets,totalRaces,goldFleetSize){
-  if(numFleets<=1)return{singleFleet:true,fs:totalEntries,pen:totalEntries+1,totalRaces,hasDisc:totalRaces>=4,cr:totalRaces>=4?totalRaces-1:totalRaces};
-  const fs=Math.ceil(totalEntries/numFleets); // per-fleet size
-  const gs=goldFleetSize||Math.ceil(totalEntries/numFleets); // gold fleet cutoff
+  if(numFleets<=1)return{singleFleet:true,fs:totalEntries,pen:totalEntries+1,totalRaces,hasDisc:totalRaces>=3,cr:totalRaces>=3?totalRaces-1:totalRaces};
+  const fs=Math.ceil(totalEntries/numFleets);
+  const gs=goldFleetSize||Math.ceil(totalEntries/numFleets);
   const pen=fs+1;
-  // Bubble sailor finishes around gs/numFleets in their fleet on average
-  const avg=Math.round(gs/numFleets);const hasDisc=totalRaces>=4;const cr=hasDisc?totalRaces-1:totalRaces;
-  const effCr=hasDisc?cr-0.5:cr;
-  const exp=Math.round(avg*effCr);return{singleFleet:false,gs,fs,pen,avg,cr,exp,opt:Math.round(exp*0.85),pes:Math.round(exp*1.15),totalRaces,hasDisc};
+  const hasDisc=totalRaces>=3;
+  const cr=hasDisc?totalRaces-1:totalRaces;
+  // Marstrand-calibrated baseline: 2025 ILCA 7 Europeans
+  // 153 entries, 3 fleets of ~51, 5 counting races, top 51 (33.3%) → midpoint cutoff ~75
+  const MARA_CUTOFF=75,MARA_FS=51,MARA_CR=5,MARA_CUT_PCT=51/153;
+  const cutPct=gs/totalEntries;
+  const exp=Math.max(1,Math.round(MARA_CUTOFF*(fs/MARA_FS)*(cr/MARA_CR)*Math.sqrt(cutPct/MARA_CUT_PCT)));
+  const avg=cr>0?Math.round(exp/cr):Math.round(fs/3);
+  return{singleFleet:false,gs,fs,pen,avg,cr,exp,opt:Math.round(exp*0.85),pes:Math.round(exp*1.15),totalRaces,hasDisc,cutPct};
 }
 
 // ═══════════════════════════════════════
@@ -421,7 +426,7 @@ function PrelimView({prelim,setPrelim,setElim,goToElim}){
       <div style={{marginTop:8,display:"flex",gap:12,flexWrap:"wrap",fontSize:11,color:C.textMuted}}>
         {est.singleFleet
           ?<span style={{color:C.amber}}>Single fleet — all {config.totalEntries} boats race together, no gold/silver split</span>
-          :<><span>Fleet size: ~{est.fs}</span><span>Pen: {est.pen}</span><span>Disc: {config.racesCompleted>=4?"1":"0"}</span><span style={{color:C.green,fontWeight:700}}>Gold: top {est.gs}</span></>}
+          :<><span>Fleet size: ~{est.fs}</span><span>Pen: {est.pen}</span><span>Disc: {config.racesCompleted>=3?"1":"0"}</span><span style={{color:C.green,fontWeight:700}}>Gold: top {est.gs}</span></>}
       </div>
     </Card>
     {!est.singleFleet&&<Card highlight accent={C.green}><SectionTitle color={C.green}>Gold Fleet Cutoff</SectionTitle>
@@ -439,8 +444,9 @@ function PrelimView({prelim,setPrelim,setElim,goToElim}){
             <div style={{fontFamily:sans,fontSize:10,color:C.textMuted,marginTop:2}}>{x.l}</div></div>)}
       </div>
       <div style={{fontSize:12,color:C.textDim,lineHeight:1.8}}>
-        To qualify gold fleet (top {est.gs}), target avg <b style={{color:C.white}}>~{ordinal(est.avg)}</b> per race over <b style={{color:C.white}}>{est.cr} counting races</b>
+        To qualify gold fleet (top {est.gs} = <b style={{color:C.white}}>{Math.round(est.cutPct*100)}%</b>), target avg <b style={{color:C.white}}>~{ordinal(est.avg)}</b> per race over <b style={{color:C.white}}>{est.cr} counting races</b>
         {est.hasDisc&&<span style={{color:C.amber}}> — one worst result dropped</span>}
+        <div style={{marginTop:4,fontSize:11,color:C.textMuted}}>Calibrated from 2025 ILCA 7 Europeans (Marstrand) · ±15% variance expected</div>
       </div>
     </Card>}
     {showImport&&<ImportModal sailors={mySailors} onApply={handleImport} onClose={()=>setShowImport(false)}/>}
@@ -476,7 +482,7 @@ function PrelimView({prelim,setPrelim,setElim,goToElim}){
               {pR<=0?<div style={{fontSize:12,color:C.green}}>✓ Under projected cutoff{est.hasDisc&&sc.discIdx.length>0?" (drop applied)":""}</div>:
               <div style={{fontSize:12,color:C.textDim}}>
                 Need <b style={{color:C.white}}>{pR} pts</b> in <b style={{color:C.white}}>{rL} races</b> → avg <b style={{color:aN<=est.avg?C.green:C.amber}}>{ordinal(aN)}</b> or better
-                {est.hasDisc&&config.racesCompleted<4&&<div style={{fontSize:11,color:C.amber,marginTop:3}}>Drop kicks in at race 4 — your worst result will be excluded from final net</div>}
+                {est.hasDisc&&config.racesCompleted<3&&<div style={{fontSize:11,color:C.amber,marginTop:3}}>Drop kicks in at race 3 (RRS) — your worst result will be excluded from final net</div>}
                 {est.hasDisc&&sc.discIdx.length>0&&<div style={{fontSize:11,color:C.primary,marginTop:3}}>Drop active — worst race excluded. Future races may improve or replace current drop</div>}
               </div>}
             </div>}

@@ -165,7 +165,7 @@ function ResultsPreview({extracted,sailors,onApply,onClose}){
           <th style={{textAlign:"left",color:C.textDim,padding:"8px 12px",fontSize:11,fontFamily:sans,fontWeight:700}}>Sailor</th>
           {Array.from({length:extracted.races},(_,i)=><th key={i} style={{textAlign:"center",color:C.primary,padding:"8px 8px",fontSize:11,minWidth:36}}>R{i+1}</th>)}
         </tr></thead>
-        <tbody>{foundNames.map((name,i)=><tr key={i} style={{borderBottom:"1px solid "+C.border+"33"}}>
+        <tbody>{foundNames.map((name,i)=><tr key={i} style={{borderBottom:"1px solid "+C.border+"22"}}>
           <td style={{padding:"8px 12px",color:C.white,fontFamily:sans,fontWeight:600}}>{name}</td>
           {extracted.results[name].map((r,j)=><td key={j} style={{padding:"8px",textAlign:"center",color:r==null?C.textMuted:isPen(r)?C.red:C.green,fontWeight:r!=null?700:400}}>{r??"-"}</td>)}
         </tr>)}</tbody>
@@ -769,8 +769,8 @@ function AdvisorView({standings,sailors,focusIdx,finalsFleet,compressed}){
       const myPO=fC.adjustedNet+(m1p!=null?(isPen(m1p)?finalsFleet+1:Number(m1p)):0)+(m2p!=null?(isPen(m2p)?finalsFleet+1:Number(m2p)):0);
       for(let rf=finalsFleet;rf>=1;rf--){let r1d=rival.f1!=null?rival.f1:(proj==="F1"?rf:null),r2d=rival.f2!=null?rival.f2:(proj==="F2"?rf:null);
         const rO=rival.adjustedNet+(r1d!=null?(isPen(r1d)?finalsFleet+1:Number(r1d)):0)+(r2d!=null?(isPen(r2d)?finalsFleet+1:Number(r2d)):0);
-        if(rO<myPO||(rO===myPO&&rival.qualRank<fC.qualRank)){ps={rn:rf,mp:myPO};break;}}
-      if(!ps)ps={rn:null,mp:myPO}}
+        if(rO<myPO||(rO===myPO&&rival.qualRank<fC.qualRank)){ps={rn:rf};break;}}
+      if(!ps)ps={rn:null}}
     return{rival,sc,ps}}),[sailors,compressed,focusIdx,finalsFleet]);
   return<div style={{display:"flex",flexDirection:"column",gap:12}}>
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8}}>

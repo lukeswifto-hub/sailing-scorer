@@ -347,7 +347,7 @@ function estimateGoldCutoff(totalEntries,numFleets,totalRaces){
 // ═══════════════════════════════════════
 // PRELIM VIEW
 // ═══════════════════════════════════════
-function PrelimView({prelim,setPrelim}){
+function PrelimView({prelim,setPrelim,setElim,goToElim}){
   const {config,mySailors}=prelim;
   const setConfig=(fn)=>setPrelim(p=>({...p,config:fn(p.config)}));
   const setSailors=(fn)=>setPrelim(p=>({...p,mySailors:fn(p.mySailors)}));
@@ -355,6 +355,31 @@ function PrelimView({prelim,setPrelim}){
   const [expS,setExpS]=useState(null);
   const [expR,setExpR]=useState(null);
   const [showImport,setShowImport]=useState(false);
+  const [promoteMsg,setPromoteMsg]=useState(null);
+
+  const promoteToElim=()=>{
+    const est=estimateGoldCutoff(config.totalEntries,config.numFleets,config.totalRaces);
+    // Score all sailors and rank them
+    const scored=mySailors.map(s=>{
+      const sc=calcNet(s.results,est.pen,config.racesCompleted,1);
+      return{name:s.name,net:sc.net,filled:s.results.filter(r=>r!=null).length};
+    });
+    scored.sort((a,b)=>a.net-b.net);
+    const ranked=scored.map((s,i)=>({...s,rank:i+1}));
+    // Push into elim mySailors — skip any already present by name
+    setElim(prev=>{
+      const existing=prev.mySailors.map(s=>s.name.toLowerCase());
+      const toAdd=ranked
+        .filter(s=>!existing.includes(s.name.toLowerCase()))
+        .map(s=>({name:s.name,prelimRank:s.rank,results:[]}));
+      const added=toAdd.length;
+      setPromoteMsg(added>0?`Promoted ${added} sailor${added!==1?"s":""} to Elimination (${ranked.length-added} already there)`:"All sailors already in Elimination");
+      setTimeout(()=>setPromoteMsg(null),4000);
+      if(added===0)return prev;
+      return{...prev,mySailors:[...prev.mySailors,...toAdd]};
+    });
+    if(goToElim)goToElim();
+  };
   const handleImport=(extracted)=>{
     const n=extracted.races;
     setConfig(c=>({...c,totalRaces:Math.max(c.totalRaces,n),racesCompleted:Math.min(Math.max(c.racesCompleted,n),Math.max(c.totalRaces,n))}));
@@ -452,7 +477,14 @@ function PrelimView({prelim,setPrelim}){
             <div style={{padding:"8px 16px 12px",display:"flex",justifyContent:"flex-end"}}><button onClick={()=>remS(si)} style={{background:"none",border:"1px solid "+C.red+"44",borderRadius:6,color:C.red,fontSize:11,padding:"6px 12px",cursor:"pointer"}}>Remove</button></div>
           </div>}
         </Card></div>})}
-      {!mySailors.length&&<div style={{color:C.textMuted,textAlign:"center",padding:20,fontSize:13}}>Add your sailors to track preliminary results</div>}
+      {!mySailors.length&&<div style={{color:C.textMuted,textAlign:"center",padding:20,fontSize:13}}>Add sailors above, or use Import Results to load from a results page</div>}
+      {mySailors.length>0&&config.racesCompleted>0&&<div style={{marginTop:12,paddingTop:12,borderTop:"1px solid "+C.border+"44"}}>
+        {promoteMsg&&<div style={{marginBottom:8,padding:"8px 12px",borderRadius:6,background:C.green+"15",border:"1px solid "+C.green+"33",color:C.green,fontSize:12}}>{promoteMsg}</div>}
+        <button onClick={promoteToElim} style={{width:"100%",padding:"11px",borderRadius:8,border:"1px solid "+C.amber+"44",background:"linear-gradient(135deg,"+C.amber+"18,"+C.green+"10)",color:C.amber,fontFamily:sans,fontSize:13,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+          ⚔ Promote to Elimination Series →
+        </button>
+        <div style={{fontSize:11,color:C.textMuted,marginTop:5,textAlign:"center"}}>Ranks sailors by current net score and adds them to the Elim tab with their prelim rank</div>
+      </div>}
     </Card>
   </div>;
 }
@@ -880,7 +912,7 @@ function EventView({event,updateEvent,onBack}){
     {l:"Advisor",short:"Advise",i:"🧭",c:C.rose}
   ];
   const content=<>
-    {tab===0&&<PrelimView prelim={prelim} setPrelim={setPrelim}/>}
+    {tab===0&&<PrelimView prelim={prelim} setPrelim={setPrelim} setElim={setElim} goToElim={()=>setTab(1)}/>}
     {tab===1&&<ElimView elim={elim} setElim={setElim}/>}
     {tab===2&&<FinalsEntryView sailors={sailors} setSailors={setSailors} focusIdx={fi} setFocusIdx={setFI} finalsFleet={ff} setFinalsFleet={setFF}/>}
     {tab===3&&<StandingsView standings={standings} sailors={sailors} focusIdx={fi}/>}

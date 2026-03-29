@@ -67,46 +67,137 @@ function useBreakpoint(){
 }
 
 // ═══════════════════════════════════════
-// AI IMAGE IMPORT
+// AI IMPORT (IMAGE + URL)
 // ═══════════════════════════════════════
 const APIKEY_SKEY="regatta-claude-key";
 function loadApiKey(){try{return localStorage.getItem(APIKEY_SKEY)||""}catch{return""}}
 function saveApiKey(k){try{localStorage.setItem(APIKEY_SKEY,k)}catch{}}
 
-async function extractResultsFromImage(base64,mime,sailorNames,apiKey){
+const AI_PROMPT=`This is a sailing regatta results sheet. Find these sailors and return their finishing position in each race column.
+
+Sailors to find: {NAMES}
+
+Return ONLY valid JSON, no explanation:
+{
+  "races": <number of race columns found>,
+  "results": {
+    "<SailorName exactly as given>": [pos_r1, pos_r2, ...]
+  }
+}
+
+Rules:
+- Match sailor names case-insensitively, use the name exactly as provided above
+- Positions are integers (1, 2, 3...)
+- Penalties stay as strings: "DSQ","DNF","DNS","OCS","UFD","BFD","DNC","RET"
+- Use null if a result is unclear or missing for that race
+- Omit sailors not found in the sheet at all`;
+
+async function callClaude(content,apiKey){
   const res=await fetch("https://api.anthropic.com/v1/messages",{
     method:"POST",
     headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-    body:JSON.stringify({
-      model:"claude-haiku-4-5-20251001",max_tokens:2048,
-      messages:[{role:"user",content:[
-        {type:"image",source:{type:"base64",media_type:mime,data:base64}},
-        {type:"text",text:`This is a sailing regatta results sheet. Find these sailors and return their finishing position in each race column.\n\nSailors to find: ${sailorNames.join(", ")}\n\nReturn ONLY valid JSON, no explanation:\n{\n  "races": <number of race columns found>,\n  "results": {\n    "<SailorName exactly as given>": [pos_r1, pos_r2, ...]\n  }\n}\n\nRules:\n- Match sailor names case-insensitively, use the name exactly as provided in the list above\n- Positions are integers (1, 2, 3...)\n- Penalties stay as strings: "DSQ","DNF","DNS","OCS","UFD","BFD","DNC","RET"\n- Use null if a result is unclear or missing for that race\n- Omit sailors not found in the sheet at all`}
-      ]}]
-    })
+    body:JSON.stringify({model:"claude-haiku-4-5-20251001",max_tokens:2048,messages:[{role:"user",content}]})
   });
   if(!res.ok){const e=await res.json();throw new Error(e.error?.message||"API error "+res.status)}
   const data=await res.json();
   const text=data.content[0].text.trim();
   const m=text.match(/\{[\s\S]*\}/);
-  if(!m)throw new Error("Couldn't find JSON in response — try a clearer image");
+  if(!m)throw new Error("Couldn't parse JSON from AI response — try a clearer source");
   return JSON.parse(m[0]);
 }
 
+async function extractFromImage(base64,mime,sailorNames,apiKey){
+  return callClaude([
+    {type:"image",source:{type:"base64",media_type:mime,data:base64}},
+    {type:"text",text:AI_PROMPT.replace("{NAMES}",sailorNames.join(", "))}
+  ],apiKey);
+}
+
+async function fetchPageText(url){
+  // Try direct fetch first; fall back to CORS proxy
+  const proxies=["","https://api.allorigins.win/get?url=","https://corsproxy.io/?"];
+  for(const proxy of proxies){
+    try{
+      const r=await fetch(proxy+encodeURIComponent(url),{signal:AbortSignal.timeout(10000)});
+      if(!r.ok)continue;
+      if(proxy.includes("allorigins")){const j=await r.json();return j.contents||""}
+      return await r.text();
+    }catch{}
+  }
+  throw new Error("Couldn't load the page. The site may block external access — try the screenshot option instead.");
+}
+
+function stripHtml(html){
+  // Keep table structure as plain text for Claude to parse
+  return html
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi,"")
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi,"")
+    .replace(/<br\s*\/?>/gi,"\n")
+    .replace(/<\/tr>/gi,"\n")
+    .replace(/<\/td>|<\/th>/gi,"\t")
+    .replace(/<[^>]+>/g,"")
+    .replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&nbsp;/g," ").replace(/&#\d+;/g," ")
+    .replace(/[ \t]+/g," ").replace(/\n[ \t]+/g,"\n").replace(/\n{3,}/g,"\n\n").trim()
+    .slice(0,30000); // cap to avoid huge token bills
+}
+
+async function extractFromUrl(url,sailorNames,apiKey){
+  const html=await fetchPageText(url);
+  const text=stripHtml(html);
+  if(text.length<100)throw new Error("Page loaded but no readable content found — try screenshot instead");
+  return callClaude([
+    {type:"text",text:"The following is the text content of a sailing regatta results page (URL: "+url+").\n\n"+text+"\n\n---\n\n"+AI_PROMPT.replace("{NAMES}",sailorNames.join(", "))}
+  ],apiKey);
+}
+
+// Shared results preview + apply UI
+function ResultsPreview({extracted,sailors,onApply,onClose}){
+  const foundNames=Object.keys(extracted.results);
+  const notFound=sailors.map(s=>s.name).filter(n=>!foundNames.find(f=>f.toLowerCase()===n.toLowerCase()));
+  return<div style={{display:"flex",flexDirection:"column",gap:12}}>
+    <div style={{padding:"10px 14px",borderRadius:6,background:C.green+"12",border:"1px solid "+C.green+"30"}}>
+      <div style={{fontSize:13,color:C.green,fontWeight:700}}>Found {foundNames.length}/{sailors.length} sailors · {extracted.races} race{extracted.races!==1?"s":""} detected</div>
+      {notFound.length>0&&<div style={{fontSize:12,color:C.amber,marginTop:4}}>Not found: {notFound.join(", ")}</div>}
+    </div>
+    <div style={{overflowX:"auto",borderRadius:6,border:"1px solid "+C.border}}>
+      <table style={{fontFamily:mono,fontSize:13}}>
+        <thead><tr style={{borderBottom:"2px solid "+C.border,background:C.surface}}>
+          <th style={{textAlign:"left",color:C.textDim,padding:"8px 12px",fontSize:11,fontFamily:sans,fontWeight:700}}>Sailor</th>
+          {Array.from({length:extracted.races},(_,i)=><th key={i} style={{textAlign:"center",color:C.primary,padding:"8px 8px",fontSize:11,minWidth:36}}>R{i+1}</th>)}
+        </tr></thead>
+        <tbody>{foundNames.map((name,i)=><tr key={i} style={{borderBottom:"1px solid "+C.border+"33"}}>
+          <td style={{padding:"8px 12px",color:C.white,fontFamily:sans,fontWeight:600}}>{name}</td>
+          {extracted.results[name].map((r,j)=><td key={j} style={{padding:"8px",textAlign:"center",color:r==null?C.textMuted:isPen(r)?C.red:C.green,fontWeight:r!=null?700:400}}>{r??"-"}</td>)}
+        </tr>)}</tbody>
+      </table>
+    </div>
+    <button onClick={()=>{onApply(extracted);onClose()}} style={{width:"100%",padding:"13px",borderRadius:8,border:"none",background:C.green,color:C.white,fontFamily:sans,fontSize:15,fontWeight:700,cursor:"pointer",boxShadow:"0 4px 16px "+C.green+"44"}}>
+      Apply Results to My Sailors ✓
+    </button>
+  </div>;
+}
+
 function ImportModal({sailors,onApply,onClose}){
+  const [mode,setMode]=useState("url"); // "url" | "image"
   const [apiKey,setApiKey]=useState(()=>loadApiKey());
   const [showKey,setShowKey]=useState(false);
-  const [imgPreview,setImgPreview]=useState(null);
-  const [imgBase64,setImgBase64]=useState(null);
-  const [imgMime,setImgMime]=useState(null);
   const [loading,setLoading]=useState(false);
   const [error,setError]=useState(null);
   const [extracted,setExtracted]=useState(null);
+  // URL mode
+  const [url,setUrl]=useState("");
+  // Image mode
+  const [imgPreview,setImgPreview]=useState(null);
+  const [imgBase64,setImgBase64]=useState(null);
+  const [imgMime,setImgMime]=useState(null);
   const fileRef=useRef();
+
+  const reset=()=>{setExtracted(null);setError(null)};
+  const switchMode=(m)=>{setMode(m);reset()};
 
   const handleFile=(file)=>{
     if(!file||!file.type.startsWith("image/"))return;
-    setImgMime(file.type);setError(null);setExtracted(null);
+    setImgMime(file.type);reset();
     const r=new FileReader();
     r.onload=(e)=>{setImgPreview(e.target.result);setImgBase64(e.target.result.split(",")[1])};
     r.readAsDataURL(file);
@@ -114,83 +205,90 @@ function ImportModal({sailors,onApply,onClose}){
 
   const doExtract=async()=>{
     if(!apiKey.trim()){setError("Enter your Claude API key first");return}
-    if(!imgBase64){setError("Upload an image first");return}
-    saveApiKey(apiKey);setLoading(true);setError(null);
+    saveApiKey(apiKey);setLoading(true);setError(null);setExtracted(null);
     try{
-      const result=await extractResultsFromImage(imgBase64,imgMime,sailors.map(s=>s.name),apiKey);
+      let result;
+      if(mode==="url"){
+        if(!url.trim()){setError("Enter a URL first");setLoading(false);return}
+        result=await extractFromUrl(url.trim(),sailors.map(s=>s.name),apiKey);
+      }else{
+        if(!imgBase64){setError("Upload an image first");setLoading(false);return}
+        result=await extractFromImage(imgBase64,imgMime,sailors.map(s=>s.name),apiKey);
+      }
       setExtracted(result);
     }catch(e){setError(e.message)}
     setLoading(false);
   };
 
-  const foundNames=extracted?Object.keys(extracted.results):[];
-  const notFound=extracted?sailors.map(s=>s.name).filter(n=>!foundNames.find(f=>f.toLowerCase()===n.toLowerCase())):[];
   const inp={padding:"9px 12px",borderRadius:6,border:"1px solid "+C.border,background:C.surface,color:C.text,fontSize:14,fontFamily:sans};
+  const canRun=!loading&&sailors.length>0&&(mode==="url"?url.trim().length>0:!!imgBase64);
 
-  return<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16,backdropFilter:"blur(2px)"}}>
-    <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:14,width:"100%",maxWidth:540,maxHeight:"92vh",overflowY:"auto",boxShadow:"0 32px 80px rgba(0,0,0,0.6)"}}>
-      <div style={{padding:"18px 20px 14px",borderBottom:"1px solid "+C.border,display:"flex",justifyContent:"space-between",alignItems:"flex-start",position:"sticky",top:0,background:C.card,zIndex:1}}>
-        <div>
-          <div style={{fontSize:16,fontWeight:700,color:C.white}}>Import Results from Image</div>
-          <div style={{fontSize:12,color:C.textMuted,marginTop:2}}>AI reads your screenshot and fills in sailor results automatically</div>
+  return<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.82)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16,backdropFilter:"blur(3px)"}}>
+    <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:14,width:"100%",maxWidth:560,maxHeight:"93vh",overflowY:"auto",boxShadow:"0 32px 80px rgba(0,0,0,0.7)"}}>
+
+      {/* Header */}
+      <div style={{padding:"18px 20px 0",display:"flex",justifyContent:"space-between",alignItems:"flex-start",position:"sticky",top:0,background:C.card,zIndex:1,paddingBottom:0}}>
+        <div style={{flex:1}}>
+          <div style={{fontSize:16,fontWeight:700,color:C.white,marginBottom:2}}>Import Results</div>
+          <div style={{fontSize:12,color:C.textMuted}}>AI finds your sailors and fills in their race results automatically</div>
         </div>
         <button onClick={onClose} style={{background:"none",border:"1px solid "+C.border,borderRadius:6,color:C.textDim,fontSize:16,cursor:"pointer",width:30,height:30,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,marginLeft:12}}>✕</button>
       </div>
-      <div style={{padding:20,display:"flex",flexDirection:"column",gap:16}}>
 
+      {/* Mode tabs */}
+      <div style={{display:"flex",gap:0,margin:"14px 20px 0",background:C.surface,borderRadius:8,border:"1px solid "+C.border,overflow:"hidden"}}>
+        {[{k:"url",label:"🔗 From URL",desc:"Paste a results page link"},{k:"image",label:"📷 From Image",desc:"Upload a screenshot"}].map(t=>
+          <button key={t.k} onClick={()=>switchMode(t.k)} style={{flex:1,padding:"10px 8px",background:mode===t.k?C.violet+"20":"transparent",border:"none",borderBottom:mode===t.k?"2px solid "+C.violet:"2px solid transparent",color:mode===t.k?C.violet:C.textDim,cursor:"pointer",fontFamily:sans,fontWeight:mode===t.k?700:400,fontSize:13}}>
+            {t.label}
+          </button>)}
+      </div>
+
+      <div style={{padding:"16px 20px 20px",display:"flex",flexDirection:"column",gap:14}}>
+
+        {/* API key */}
         <div>
-          <div style={{fontSize:11,color:C.textDim,marginBottom:6,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px"}}>Claude API Key</div>
+          <div style={{fontSize:11,color:C.textDim,marginBottom:5,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px"}}>Claude API Key</div>
           <div style={{display:"flex",gap:6}}>
             <input type={showKey?"text":"password"} placeholder="sk-ant-api03-..." value={apiKey} onChange={e=>setApiKey(e.target.value)} style={{...inp,fontFamily:mono,fontSize:12,flex:1}}/>
             <button onClick={()=>setShowKey(!showKey)} style={{padding:"9px 12px",borderRadius:6,border:"1px solid "+C.border,background:C.surface,color:C.textDim,cursor:"pointer",fontSize:12,flexShrink:0}}>{showKey?"Hide":"Show"}</button>
           </div>
-          <div style={{fontSize:11,color:C.textMuted,marginTop:4}}>Stored only in your browser. Used only to call Anthropic's API. Get a key at console.anthropic.com.</div>
+          <div style={{fontSize:11,color:C.textMuted,marginTop:3}}>Stored locally in your browser only · <a href="https://console.anthropic.com" target="_blank" rel="noreferrer" style={{color:C.primary}}>Get a key</a></div>
         </div>
 
-        <div>
-          <div style={{fontSize:11,color:C.textDim,marginBottom:6,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px"}}>Results Sheet Image</div>
-          <div onDragOver={e=>e.preventDefault()} onDrop={e=>{e.preventDefault();handleFile(e.dataTransfer.files[0])}} onClick={()=>fileRef.current.click()} style={{border:"2px dashed "+(imgPreview?C.primary:C.border),borderRadius:8,padding:imgPreview?"8px":"28px 16px",textAlign:"center",cursor:"pointer",background:C.surface,transition:"border-color 0.2s"}}>
+        {/* URL input */}
+        {mode==="url"&&<div>
+          <div style={{fontSize:11,color:C.textDim,marginBottom:5,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px"}}>Results Page URL</div>
+          <input value={url} onChange={e=>{setUrl(e.target.value);reset()}} onKeyDown={e=>e.key==="Enter"&&doExtract()} placeholder="https://yachtscoring.com/event_results.cfm?..." style={{...inp,width:"100%",fontFamily:mono,fontSize:12}}/>
+          <div style={{fontSize:11,color:C.textMuted,marginTop:3}}>Works with most public results sites: Yachtscoring, Sailwave, Regatta Network, etc.</div>
+        </div>}
+
+        {/* Image upload */}
+        {mode==="image"&&<div>
+          <div style={{fontSize:11,color:C.textDim,marginBottom:5,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px"}}>Results Sheet Image</div>
+          <div onDragOver={e=>e.preventDefault()} onDrop={e=>{e.preventDefault();handleFile(e.dataTransfer.files[0])}} onClick={()=>fileRef.current.click()} style={{border:"2px dashed "+(imgPreview?C.violet:C.border),borderRadius:8,padding:imgPreview?"8px":"24px 16px",textAlign:"center",cursor:"pointer",background:C.surface}}>
             {imgPreview
-              ?<img src={imgPreview} style={{maxWidth:"100%",maxHeight:200,borderRadius:6,objectFit:"contain"}} alt="preview"/>
-              :<div><div style={{fontSize:32,marginBottom:8}}>📋</div><div style={{color:C.textDim,fontSize:14,fontWeight:600}}>Drag & drop or click to upload</div><div style={{color:C.textMuted,fontSize:12,marginTop:4}}>PNG, JPG, screenshot of the results sheet</div></div>}
+              ?<img src={imgPreview} style={{maxWidth:"100%",maxHeight:180,borderRadius:6,objectFit:"contain"}} alt="preview"/>
+              :<div><div style={{fontSize:28,marginBottom:6}}>📋</div><div style={{color:C.textDim,fontSize:13,fontWeight:600}}>Drag & drop or click to upload</div><div style={{color:C.textMuted,fontSize:11,marginTop:3}}>PNG, JPG, screenshot of results sheet</div></div>}
           </div>
           <input ref={fileRef} type="file" accept="image/*" style={{display:"none"}} onChange={e=>handleFile(e.target.files[0])}/>
-          {imgPreview&&<button onClick={()=>{setImgPreview(null);setImgBase64(null);setExtracted(null)}} style={{marginTop:6,background:"none",border:"none",color:C.textMuted,fontSize:12,cursor:"pointer",padding:0}}>Remove image ✕</button>}
-        </div>
+          {imgPreview&&<button onClick={()=>{setImgPreview(null);setImgBase64(null);reset()}} style={{marginTop:5,background:"none",border:"none",color:C.textMuted,fontSize:11,cursor:"pointer",padding:0}}>Remove ✕</button>}
+        </div>}
 
+        {/* Sailors list */}
         <div style={{padding:"10px 14px",borderRadius:6,background:C.surface,border:"1px solid "+C.border}}>
-          <div style={{fontSize:11,color:C.textDim,marginBottom:6,fontWeight:700}}>Searching for {sailors.length} sailor{sailors.length!==1?"s":""}:</div>
-          <div style={{display:"flex",flexWrap:"wrap",gap:4}}>{sailors.map((s,i)=><Badge key={i} color={C.primary}>{s.name}</Badge>)}</div>
-          {sailors.length===0&&<div style={{fontSize:12,color:C.textMuted}}>Add sailors first, then import their results</div>}
+          <div style={{fontSize:11,color:C.textDim,marginBottom:5,fontWeight:700}}>Searching for {sailors.length} sailor{sailors.length!==1?"s":""}:</div>
+          {sailors.length>0
+            ?<div style={{display:"flex",flexWrap:"wrap",gap:4}}>{sailors.map((s,i)=><Badge key={i} color={C.primary}>{s.name}</Badge>)}</div>
+            :<div style={{fontSize:12,color:C.textMuted}}>Add sailors first, then import their results</div>}
         </div>
 
-        {error&&<div style={{padding:"10px 14px",borderRadius:6,background:C.red+"15",border:"1px solid "+C.red+"33",color:C.red,fontSize:13}}>{error}</div>}
+        {error&&<div style={{padding:"10px 14px",borderRadius:6,background:C.red+"15",border:"1px solid "+C.red+"33",color:C.red,fontSize:13,lineHeight:1.5}}>{error}</div>}
 
-        <button onClick={doExtract} disabled={loading||!imgBase64||sailors.length===0} style={{padding:"12px",borderRadius:8,border:"none",background:loading||!imgBase64||sailors.length===0?C.surface:"linear-gradient(135deg,"+C.primary+","+C.violet+")",color:loading||!imgBase64||sailors.length===0?C.textMuted:C.white,fontFamily:sans,fontSize:14,fontWeight:700,cursor:loading||!imgBase64||sailors.length===0?"not-allowed":"pointer",transition:"opacity 0.2s"}}>
-          {loading?"🔍 Extracting results...":"Extract Results with AI"}
+        <button onClick={doExtract} disabled={!canRun} style={{padding:"12px",borderRadius:8,border:"none",background:canRun?"linear-gradient(135deg,"+C.violet+","+C.primary+")":C.surface,color:canRun?C.white:C.textMuted,fontFamily:sans,fontSize:14,fontWeight:700,cursor:canRun?"pointer":"not-allowed"}}>
+          {loading?(mode==="url"?"🔗 Fetching & extracting...":"🔍 Extracting results..."):(mode==="url"?"Extract from URL":"Extract from Image")}
         </button>
 
-        {extracted&&<div>
-          <div style={{padding:"10px 14px",borderRadius:6,background:C.green+"12",border:"1px solid "+C.green+"30",marginBottom:12}}>
-            <div style={{fontSize:13,color:C.green,fontWeight:700}}>Found {foundNames.length}/{sailors.length} sailors • {extracted.races} race{extracted.races!==1?"s":""} detected</div>
-            {notFound.length>0&&<div style={{fontSize:12,color:C.amber,marginTop:4}}>Not found: {notFound.join(", ")}</div>}
-          </div>
-          <div style={{overflowX:"auto",marginBottom:12,borderRadius:6,border:"1px solid "+C.border}}>
-            <table style={{fontFamily:mono,fontSize:13}}>
-              <thead><tr style={{borderBottom:"2px solid "+C.border,background:C.surface}}>
-                <th style={{textAlign:"left",color:C.textDim,padding:"8px 12px",fontSize:11,fontFamily:sans}}>Sailor</th>
-                {Array.from({length:extracted.races},(_,i)=><th key={i} style={{textAlign:"center",color:C.primary,padding:"8px 8px",fontSize:11,minWidth:36}}>R{i+1}</th>)}
-              </tr></thead>
-              <tbody>{foundNames.map((name,i)=><tr key={i} style={{borderBottom:"1px solid "+C.border+"33"}}>
-                <td style={{padding:"8px 12px",color:C.white,fontFamily:sans,fontWeight:600}}>{name}</td>
-                {extracted.results[name].map((r,j)=><td key={j} style={{padding:"8px",textAlign:"center",color:r==null?C.textMuted:isPen(r)?C.red:C.green,fontWeight:r!=null?700:400}}>{r??"-"}</td>)}
-              </tr>)}</tbody>
-            </table>
-          </div>
-          <button onClick={()=>{onApply(extracted);onClose()}} style={{width:"100%",padding:"13px",borderRadius:8,border:"none",background:C.green,color:C.white,fontFamily:sans,fontSize:14,fontWeight:700,cursor:"pointer",boxShadow:"0 4px 16px "+C.green+"44"}}>
-            Apply Results to My Sailors
-          </button>
-        </div>}
+        {extracted&&<ResultsPreview extracted={extracted} sailors={sailors} onApply={onApply} onClose={onClose}/>}
       </div>
     </div>
   </div>;

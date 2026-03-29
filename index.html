@@ -920,14 +920,14 @@ function EventView({event,updateEvent,onBack}){
     {id:4,l:"Advisor",short:"Advise",i:"🧭",c:C.rose,always:false}
   ];
   const tabs=allTabs.filter(t=>t.always||!singleFleet);
-  const safeTab=tabs.find(t=>t.id===tab)?tab:0;
-  if(safeTab!==tab)setTab(0);
+  const validTab=tabs.find(t=>t.id===tab)?tab:0;
+  useEffect(()=>{if(validTab!==tab)setTab(0)},[singleFleet]);
   const content=<>
-    {safeTab===0&&<PrelimView prelim={prelim} setPrelim={setPrelim} setElim={setElim} goToElim={()=>setTab(1)}/>}
-    {safeTab===1&&<ElimView elim={elim} setElim={setElim}/>}
-    {safeTab===2&&<FinalsEntryView sailors={sailors} setSailors={setSailors} focusIdx={fi} setFocusIdx={setFI} finalsFleet={ff} setFinalsFleet={setFF}/>}
-    {safeTab===3&&<StandingsView standings={standings} sailors={sailors} focusIdx={fi}/>}
-    {safeTab===4&&<AdvisorView standings={standings} sailors={sailors} focusIdx={fi} finalsFleet={ff} compressed={compressed}/>}
+    {validTab===0&&<PrelimView prelim={prelim} setPrelim={setPrelim} setElim={setElim} goToElim={()=>setTab(1)}/>}
+    {validTab===1&&<ElimView elim={elim} setElim={setElim}/>}
+    {validTab===2&&<FinalsEntryView sailors={sailors} setSailors={setSailors} focusIdx={fi} setFocusIdx={setFI} finalsFleet={ff} setFinalsFleet={setFF}/>}
+    {validTab===3&&<StandingsView standings={standings} sailors={sailors} focusIdx={fi}/>}
+    {validTab===4&&<AdvisorView standings={standings} sailors={sailors} focusIdx={fi} finalsFleet={ff} compressed={compressed}/>}
   </>;
 
   if(isDesktop){
@@ -957,7 +957,7 @@ function EventView({event,updateEvent,onBack}){
           <span style={{fontSize:15}}>←</span> All Regattas
         </button>
         <nav style={{flex:1,padding:"8px 0",overflowY:"auto"}}>
-          {tabs.map(t=><button key={t.id} onClick={()=>setTab(t.id)} style={{display:"flex",alignItems:"center",gap:13,width:"100%",padding:"13px 22px",background:safeTab===t.id?t.c+"15":"none",border:"none",borderLeft:safeTab===t.id?"3px solid "+t.c:"3px solid transparent",color:safeTab===t.id?t.c:C.textDim,cursor:"pointer",fontFamily:sans,fontSize:14,fontWeight:safeTab===t.id?700:400,textAlign:"left"}}>
+          {tabs.map(t=><button key={t.id} onClick={()=>setTab(t.id)} style={{display:"flex",alignItems:"center",gap:13,width:"100%",padding:"13px 22px",background:validTab===t.id?t.c+"15":"none",border:"none",borderLeft:validTab===t.id?"3px solid "+t.c:"3px solid transparent",color:validTab===t.id?t.c:C.textDim,cursor:"pointer",fontFamily:sans,fontSize:14,fontWeight:validTab===t.id?700:400,textAlign:"left"}}>
             <span style={{fontSize:17,width:22,textAlign:"center",flexShrink:0}}>{t.i}</span>{t.l}
           </button>)}
         </nav>
@@ -993,7 +993,7 @@ function EventView({event,updateEvent,onBack}){
       <div style={{height:16}}/>
     </div>
     <div style={{display:"flex",background:C.surface,borderTop:"1px solid "+C.border,flexShrink:0,paddingBottom:"env(safe-area-inset-bottom)"}}>
-      {tabs.map(t=><button key={t.id} onClick={()=>setTab(t.id)} style={{flex:1,padding:"10px 4px 9px",background:safeTab===t.id?t.c+"14":"transparent",border:"none",borderTop:safeTab===t.id?"2px solid "+t.c:"2px solid transparent",color:safeTab===t.id?t.c:C.textMuted,fontFamily:sans,fontSize:9,fontWeight:safeTab===t.id?700:500,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,letterSpacing:"0.2px",textTransform:"uppercase"}}>
+      {tabs.map(t=><button key={t.id} onClick={()=>setTab(t.id)} style={{flex:1,padding:"10px 4px 9px",background:validTab===t.id?t.c+"14":"transparent",border:"none",borderTop:validTab===t.id?"2px solid "+t.c:"2px solid transparent",color:validTab===t.id?t.c:C.textMuted,fontFamily:sans,fontSize:9,fontWeight:validTab===t.id?700:500,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,letterSpacing:"0.2px",textTransform:"uppercase"}}>
         <span style={{fontSize:17}}>{t.i}</span>{t.short}
       </button>)}
     </div>

@@ -19,8 +19,6 @@ input[type="date"]{color-scheme:dark}
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:#1e3352;border-radius:4px}
 ::-webkit-scrollbar-thumb:hover{background:#263d5e}
-input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
-input[type=number]{-moz-appearance:textfield;appearance:textfield}
 table{border-collapse:collapse;width:100%}
 th,td{padding:8px 6px;font-size:13px}
 </style>
@@ -301,18 +299,21 @@ function Badge({children,color=C.primary}){return<span style={{display:"inline-b
 function SectionTitle({children,color}){return<h3 style={{color:color||C.primary,fontFamily:sans,fontSize:12,margin:"0 0 12px",textTransform:"uppercase",letterSpacing:"1.5px",fontWeight:700}}>{children}</h3>}
 function NumberStepper({label,value,onChange,min=0,max=999}){
   const [draft,setDraft]=useState(String(value));
-  useEffect(()=>setDraft(String(value)),[value]);
-  const commit=(str)=>{const v=parseInt(str,10);onChange(!isNaN(v)?Math.min(max,Math.max(min,v)):value)};
+  const [focused,setFocused]=useState(false);
+  useEffect(()=>{if(!focused)setDraft(String(value))},[value,focused]);
+  const commit=()=>{const v=parseInt(draft,10);const clamped=!isNaN(v)?Math.min(max,Math.max(min,v)):value;setDraft(String(clamped));onChange(clamped)};
   const bs={width:32,height:36,borderRadius:7,border:"1px solid "+C.border,background:C.surface,color:C.primary,fontSize:18,cursor:"pointer",fontFamily:mono,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,flexShrink:0};
   return<div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"9px 0",borderBottom:"1px solid "+C.border+"44"}}>
     <span style={{color:C.text,fontFamily:sans,fontSize:14}}>{label}</span>
     <div style={{display:"flex",alignItems:"center",gap:6}}>
       <button onClick={()=>onChange(Math.max(min,value-1))} style={bs}>−</button>
       <input
-        type="number" value={draft} min={min} max={max}
-        onChange={e=>setDraft(e.target.value)}
-        onBlur={()=>commit(draft)}
-        onKeyDown={e=>{if(e.key==="Enter"){commit(draft);e.target.blur()}}}
+        type="text" inputMode="numeric" pattern="[0-9]*"
+        value={draft}
+        onChange={e=>setDraft(e.target.value.replace(/[^0-9]/g,""))}
+        onFocus={e=>{setFocused(true);e.target.select()}}
+        onBlur={()=>{setFocused(false);commit()}}
+        onKeyDown={e=>{if(e.key==="Enter"){commit();e.target.blur()}}}
         style={{width:64,padding:"5px 6px",borderRadius:7,border:"1px solid "+C.border,background:C.surface,color:C.white,fontFamily:mono,fontSize:18,fontWeight:800,textAlign:"center"}}
       />
       <button onClick={()=>onChange(Math.min(max,value+1))} style={bs}>+</button>

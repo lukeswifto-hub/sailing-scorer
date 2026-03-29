@@ -96,7 +96,7 @@ function StatusBadge({net,optimistic,expected,pessimistic}){
 
 function estimateGoldCutoff(totalEntries,numFleets,totalRaces){
   const gs=Math.ceil(totalEntries/numFleets);const fs=gs;const pen=fs+1;
-  const avg=Math.round(fs/3);const hasDisc=totalRaces>=4;const cr=hasDisc?totalRaces-1:totalRaces;
+  const avg=Math.round(fs/numFleets);const hasDisc=totalRaces>=4;const cr=hasDisc?totalRaces-1:totalRaces;
   const exp=avg*cr;return{gs,fs,pen,avg,cr,exp,opt:Math.round(exp*0.85),pes:Math.round(exp*1.15),totalRaces,hasDisc};
 }
 

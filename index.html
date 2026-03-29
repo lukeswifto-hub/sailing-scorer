@@ -341,12 +341,11 @@ function StatusBadge({net,optimistic,expected,pessimistic}){
 }
 
 function estimateGoldCutoff(totalEntries,numFleets,totalRaces){
+  if(numFleets<=1)return{singleFleet:true,fs:totalEntries,pen:totalEntries+1,totalRaces,hasDisc:totalRaces>=4,cr:totalRaces>=4?totalRaces-1:totalRaces};
   const gs=Math.ceil(totalEntries/numFleets);const fs=gs;const pen=fs+1;
   const avg=Math.round(fs/numFleets);const hasDisc=totalRaces>=4;const cr=hasDisc?totalRaces-1:totalRaces;
-  // With a drop, the dropped race is ~1.5× avg (worse than average), so effective counting avg is lower.
-  // Use (cr - 0.5) when drop is active to model that the drop saves more than an average race.
   const effCr=hasDisc?cr-0.5:cr;
-  const exp=Math.round(avg*effCr);return{gs,fs,pen,avg,cr,exp,opt:Math.round(exp*0.85),pes:Math.round(exp*1.15),totalRaces,hasDisc};
+  const exp=Math.round(avg*effCr);return{singleFleet:false,gs,fs,pen,avg,cr,exp,opt:Math.round(exp*0.85),pes:Math.round(exp*1.15),totalRaces,hasDisc};
 }
 
 // ═══════════════════════════════════════
@@ -409,10 +408,12 @@ function PrelimView({prelim,setPrelim,setElim,goToElim}){
       <NumberStepper label="Total Races" value={config.totalRaces} onChange={v=>setConfig(c=>({...c,totalRaces:v}))} min={1} max={10}/>
       <NumberStepper label="Races Completed" value={config.racesCompleted} onChange={v=>setConfig(c=>({...c,racesCompleted:Math.min(v,config.totalRaces)}))} min={0} max={config.totalRaces}/>
       <div style={{marginTop:8,display:"flex",gap:12,flexWrap:"wrap",fontSize:11,color:C.textMuted}}>
-        <span>Fleet: ~{est.fs}</span><span>Pen: {est.pen}</span><span>Disc: {config.racesCompleted>=3?"1":"0"}</span><span>Gold: top {est.gs}</span>
+        {est.singleFleet
+          ?<span style={{color:C.amber}}>Single fleet — all {config.totalEntries} boats race together, no gold/silver split</span>
+          :<><span>Fleet: ~{est.fs}</span><span>Pen: {est.pen}</span><span>Disc: {config.racesCompleted>=4?"1":"0"}</span><span>Gold: top {est.gs}</span></>}
       </div>
     </Card>
-    <Card highlight accent={C.green}><SectionTitle color={C.green}>Gold Fleet Cutoff</SectionTitle>
+    {!est.singleFleet&&<Card highlight accent={C.green}><SectionTitle color={C.green}>Gold Fleet Cutoff</SectionTitle>
       {est.hasDisc&&<div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12,padding:"8px 12px",borderRadius:6,background:C.amber+"12",border:"1px solid "+C.amber+"30"}}>
         <span style={{fontFamily:mono,fontSize:11,color:C.amber}}>{est.totalRaces} races sailed</span>
         <span style={{color:C.textMuted,fontSize:11}}>→</span>
@@ -430,7 +431,7 @@ function PrelimView({prelim,setPrelim,setElim,goToElim}){
         To qualify gold fleet (top {est.gs}), target avg <b style={{color:C.white}}>~{ordinal(est.avg)}</b> per race over <b style={{color:C.white}}>{est.cr} counting races</b>
         {est.hasDisc&&<span style={{color:C.amber}}> — one worst result dropped</span>}
       </div>
-    </Card>
+    </Card>}
     {showImport&&<ImportModal sailors={mySailors} onApply={handleImport} onClose={()=>setShowImport(false)}/>}
     <Card>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
@@ -483,7 +484,7 @@ function PrelimView({prelim,setPrelim,setElim,goToElim}){
           </div>}
         </Card></div>})}
       {!mySailors.length&&<div style={{color:C.textMuted,textAlign:"center",padding:20,fontSize:13}}>Add sailors above, or use Import Results to load from a results page</div>}
-      {mySailors.length>0&&config.racesCompleted>0&&<div style={{marginTop:12,paddingTop:12,borderTop:"1px solid "+C.border+"44"}}>
+      {mySailors.length>0&&config.racesCompleted>0&&!est.singleFleet&&<div style={{marginTop:12,paddingTop:12,borderTop:"1px solid "+C.border+"44"}}>
         {promoteMsg&&<div style={{marginBottom:8,padding:"8px 12px",borderRadius:6,background:C.green+"15",border:"1px solid "+C.green+"33",color:C.green,fontSize:12}}>{promoteMsg}</div>}
         <button onClick={promoteToElim} style={{width:"100%",padding:"11px",borderRadius:8,border:"1px solid "+C.amber+"44",background:"linear-gradient(135deg,"+C.amber+"18,"+C.green+"10)",color:C.amber,fontFamily:sans,fontSize:13,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
           ⚔ Promote to Elimination Series →
@@ -909,19 +910,23 @@ function EventView({event,updateEvent,onBack}){
   const standings=useMemo(()=>{const sc=compressed.map(s=>{const o=calcFinalsOverall(s.adjustedNet,s.f1,s.f2,ff);return{...s,overall:o,f1Score:s.f1!=null?(isPen(s.f1)?ff+1:Number(s.f1)):null,f2Score:s.f2!=null?(isPen(s.f2)?ff+1:Number(s.f2)):null}});
     sc.sort((a,b)=>{if(a.overall!==b.overall)return a.overall-b.overall;const aF=[a.f1Score,a.f2Score].filter(x=>x!=null).sort((x,y)=>x-y),bF=[b.f1Score,b.f2Score].filter(x=>x!=null).sort((x,y)=>x-y);for(let i=0;i<Math.max(aF.length,bF.length);i++){if((aF[i]??Infinity)!==(bF[i]??Infinity))return(aF[i]??Infinity)-(bF[i]??Infinity)}return a.qualRank-b.qualRank});
     return sc.map((s,i)=>({...s,rank:i+1}))},[compressed,ff]);
-  const tabs=[
-    {l:"Preliminary",short:"Prelim",i:"🏁",c:C.primary},
-    {l:"Elimination",short:"Elim",i:"⚔",c:C.amber},
-    {l:"Finals",short:"Finals",i:"🏅",c:C.green},
-    {l:"Standings",short:"Table",i:"📊",c:C.violet},
-    {l:"Advisor",short:"Advise",i:"🧭",c:C.rose}
+  const singleFleet=prelim.config.numFleets<=1;
+  const allTabs=[
+    {id:0,l:"Preliminary",short:"Prelim",i:"🏁",c:C.primary,always:true},
+    {id:1,l:"Elimination",short:"Elim",i:"⚔",c:C.amber,always:false},
+    {id:2,l:"Finals",short:"Finals",i:"🏅",c:C.green,always:false},
+    {id:3,l:"Standings",short:"Table",i:"📊",c:C.violet,always:false},
+    {id:4,l:"Advisor",short:"Advise",i:"🧭",c:C.rose,always:false}
   ];
+  const tabs=allTabs.filter(t=>t.always||!singleFleet);
+  const safeTab=tabs.find(t=>t.id===tab)?tab:0;
+  if(safeTab!==tab)setTab(0);
   const content=<>
-    {tab===0&&<PrelimView prelim={prelim} setPrelim={setPrelim} setElim={setElim} goToElim={()=>setTab(1)}/>}
-    {tab===1&&<ElimView elim={elim} setElim={setElim}/>}
-    {tab===2&&<FinalsEntryView sailors={sailors} setSailors={setSailors} focusIdx={fi} setFocusIdx={setFI} finalsFleet={ff} setFinalsFleet={setFF}/>}
-    {tab===3&&<StandingsView standings={standings} sailors={sailors} focusIdx={fi}/>}
-    {tab===4&&<AdvisorView standings={standings} sailors={sailors} focusIdx={fi} finalsFleet={ff} compressed={compressed}/>}
+    {safeTab===0&&<PrelimView prelim={prelim} setPrelim={setPrelim} setElim={setElim} goToElim={()=>setTab(1)}/>}
+    {safeTab===1&&<ElimView elim={elim} setElim={setElim}/>}
+    {safeTab===2&&<FinalsEntryView sailors={sailors} setSailors={setSailors} focusIdx={fi} setFocusIdx={setFI} finalsFleet={ff} setFinalsFleet={setFF}/>}
+    {safeTab===3&&<StandingsView standings={standings} sailors={sailors} focusIdx={fi}/>}
+    {safeTab===4&&<AdvisorView standings={standings} sailors={sailors} focusIdx={fi} finalsFleet={ff} compressed={compressed}/>}
   </>;
 
   if(isDesktop){
@@ -951,7 +956,7 @@ function EventView({event,updateEvent,onBack}){
           <span style={{fontSize:15}}>←</span> All Regattas
         </button>
         <nav style={{flex:1,padding:"8px 0",overflowY:"auto"}}>
-          {tabs.map((t,i)=><button key={i} onClick={()=>setTab(i)} style={{display:"flex",alignItems:"center",gap:13,width:"100%",padding:"13px 22px",background:tab===i?t.c+"15":"none",border:"none",borderLeft:tab===i?"3px solid "+t.c:"3px solid transparent",color:tab===i?t.c:C.textDim,cursor:"pointer",fontFamily:sans,fontSize:14,fontWeight:tab===i?700:400,textAlign:"left"}}>
+          {tabs.map(t=><button key={t.id} onClick={()=>setTab(t.id)} style={{display:"flex",alignItems:"center",gap:13,width:"100%",padding:"13px 22px",background:safeTab===t.id?t.c+"15":"none",border:"none",borderLeft:safeTab===t.id?"3px solid "+t.c:"3px solid transparent",color:safeTab===t.id?t.c:C.textDim,cursor:"pointer",fontFamily:sans,fontSize:14,fontWeight:safeTab===t.id?700:400,textAlign:"left"}}>
             <span style={{fontSize:17,width:22,textAlign:"center",flexShrink:0}}>{t.i}</span>{t.l}
           </button>)}
         </nav>
@@ -987,7 +992,7 @@ function EventView({event,updateEvent,onBack}){
       <div style={{height:16}}/>
     </div>
     <div style={{display:"flex",background:C.surface,borderTop:"1px solid "+C.border,flexShrink:0,paddingBottom:"env(safe-area-inset-bottom)"}}>
-      {tabs.map((t,i)=><button key={i} onClick={()=>setTab(i)} style={{flex:1,padding:"10px 4px 9px",background:tab===i?t.c+"14":"transparent",border:"none",borderTop:tab===i?"2px solid "+t.c:"2px solid transparent",color:tab===i?t.c:C.textMuted,fontFamily:sans,fontSize:9,fontWeight:tab===i?700:500,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,letterSpacing:"0.2px",textTransform:"uppercase"}}>
+      {tabs.map(t=><button key={t.id} onClick={()=>setTab(t.id)} style={{flex:1,padding:"10px 4px 9px",background:safeTab===t.id?t.c+"14":"transparent",border:"none",borderTop:safeTab===t.id?"2px solid "+t.c:"2px solid transparent",color:safeTab===t.id?t.c:C.textMuted,fontFamily:sans,fontSize:9,fontWeight:safeTab===t.id?700:500,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,letterSpacing:"0.2px",textTransform:"uppercase"}}>
         <span style={{fontSize:17}}>{t.i}</span>{t.short}
       </button>)}
     </div>

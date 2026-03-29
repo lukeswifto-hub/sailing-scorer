@@ -392,7 +392,7 @@ function PrelimView({prelim,setPrelim}){
     <Card>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
         <div style={{display:"flex",alignItems:"center",gap:8}}><SectionTitle>My Sailors</SectionTitle><Badge>{mySailors.length}</Badge></div>
-        {mySailors.length>0&&<button onClick={()=>setShowImport(true)} style={{padding:"6px 12px",borderRadius:6,border:"1px solid "+C.violet+"44",background:C.violet+"15",color:C.violet,fontFamily:sans,fontSize:12,fontWeight:700,cursor:"pointer"}}>📋 Import from Image</button>}
+        <button onClick={()=>setShowImport(true)} style={{padding:"7px 14px",borderRadius:7,border:"1px solid "+C.violet+"55",background:"linear-gradient(135deg,"+C.violet+"25,"+C.primary+"15)",color:C.violet,fontFamily:sans,fontSize:12,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:5}}>📋 Import Results</button>
       </div>
       <div style={{display:"flex",gap:8,marginBottom:12}}>
         <input placeholder="Sailor name" value={newName} onChange={e=>setNewName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addS()} style={{flex:1,padding:"10px 12px",borderRadius:6,border:"1px solid "+C.border,background:C.surface,color:C.text,fontSize:14,fontFamily:sans}}/>
@@ -532,7 +532,7 @@ function ElimView({elim,setElim}){
     <Card>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
         <div style={{display:"flex",alignItems:"center",gap:8}}><SectionTitle color={C.amber}>Sailors</SectionTitle><Badge color={C.amber}>{mySailors.length}</Badge></div>
-        {mySailors.length>0&&<button onClick={()=>setShowImport(true)} style={{padding:"6px 12px",borderRadius:6,border:"1px solid "+C.violet+"44",background:C.violet+"15",color:C.violet,fontFamily:sans,fontSize:12,fontWeight:700,cursor:"pointer"}}>📋 Import from Image</button>}
+        <button onClick={()=>setShowImport(true)} style={{padding:"7px 14px",borderRadius:7,border:"1px solid "+C.violet+"55",background:"linear-gradient(135deg,"+C.violet+"25,"+C.primary+"15)",color:C.violet,fontFamily:sans,fontSize:12,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:5}}>📋 Import Results</button>
       </div>
       <div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}}>
         <input placeholder="Name" value={newName} onChange={e=>setNewName(e.target.value)} style={{...inputS,fontFamily:sans,flex:"2 1 120px"}} onKeyDown={e=>e.key==="Enter"&&addS()}/>

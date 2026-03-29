@@ -26,7 +26,7 @@ th,td{padding:8px 6px;font-size:13px}
 <body>
 <div id="root"></div>
 <script type="text/babel">
-const {useState,useEffect,useMemo}=React;
+const {useState,useEffect,useMemo,useRef}=React;
 const C={bg:"#080f1c",surface:"#101e33",card:"#162540",border:"#1e3352",primary:"#00d4f5",amber:"#f59e0b",red:"#f43f5e",green:"#10b981",violet:"#8b5cf6",rose:"#f472b6",text:"#e8f0fc",textDim:"#7b8fa8",textMuted:"#3d5470",white:"#fff"};
 const mono="'JetBrains Mono',monospace",sans="'Outfit',system-ui,sans-serif";
 const PEN_CODES=["DSQ","UFD","OCS","DNS","DNF","RET","DNC","BFD","DNE","RAF"];
@@ -64,6 +64,136 @@ function useBreakpoint(){
   const [w,setW]=useState(()=>window.innerWidth);
   useEffect(()=>{const fn=()=>setW(window.innerWidth);window.addEventListener('resize',fn,{passive:true});return()=>window.removeEventListener('resize',fn)},[]);
   return w>=1024;
+}
+
+// ═══════════════════════════════════════
+// AI IMAGE IMPORT
+// ═══════════════════════════════════════
+const APIKEY_SKEY="regatta-claude-key";
+function loadApiKey(){try{return localStorage.getItem(APIKEY_SKEY)||""}catch{return""}}
+function saveApiKey(k){try{localStorage.setItem(APIKEY_SKEY,k)}catch{}}
+
+async function extractResultsFromImage(base64,mime,sailorNames,apiKey){
+  const res=await fetch("https://api.anthropic.com/v1/messages",{
+    method:"POST",
+    headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+    body:JSON.stringify({
+      model:"claude-haiku-4-5-20251001",max_tokens:2048,
+      messages:[{role:"user",content:[
+        {type:"image",source:{type:"base64",media_type:mime,data:base64}},
+        {type:"text",text:`This is a sailing regatta results sheet. Find these sailors and return their finishing position in each race column.\n\nSailors to find: ${sailorNames.join(", ")}\n\nReturn ONLY valid JSON, no explanation:\n{\n  "races": <number of race columns found>,\n  "results": {\n    "<SailorName exactly as given>": [pos_r1, pos_r2, ...]\n  }\n}\n\nRules:\n- Match sailor names case-insensitively, use the name exactly as provided in the list above\n- Positions are integers (1, 2, 3...)\n- Penalties stay as strings: "DSQ","DNF","DNS","OCS","UFD","BFD","DNC","RET"\n- Use null if a result is unclear or missing for that race\n- Omit sailors not found in the sheet at all`}
+      ]}]
+    })
+  });
+  if(!res.ok){const e=await res.json();throw new Error(e.error?.message||"API error "+res.status)}
+  const data=await res.json();
+  const text=data.content[0].text.trim();
+  const m=text.match(/\{[\s\S]*\}/);
+  if(!m)throw new Error("Couldn't find JSON in response — try a clearer image");
+  return JSON.parse(m[0]);
+}
+
+function ImportModal({sailors,onApply,onClose}){
+  const [apiKey,setApiKey]=useState(()=>loadApiKey());
+  const [showKey,setShowKey]=useState(false);
+  const [imgPreview,setImgPreview]=useState(null);
+  const [imgBase64,setImgBase64]=useState(null);
+  const [imgMime,setImgMime]=useState(null);
+  const [loading,setLoading]=useState(false);
+  const [error,setError]=useState(null);
+  const [extracted,setExtracted]=useState(null);
+  const fileRef=useRef();
+
+  const handleFile=(file)=>{
+    if(!file||!file.type.startsWith("image/"))return;
+    setImgMime(file.type);setError(null);setExtracted(null);
+    const r=new FileReader();
+    r.onload=(e)=>{setImgPreview(e.target.result);setImgBase64(e.target.result.split(",")[1])};
+    r.readAsDataURL(file);
+  };
+
+  const doExtract=async()=>{
+    if(!apiKey.trim()){setError("Enter your Claude API key first");return}
+    if(!imgBase64){setError("Upload an image first");return}
+    saveApiKey(apiKey);setLoading(true);setError(null);
+    try{
+      const result=await extractResultsFromImage(imgBase64,imgMime,sailors.map(s=>s.name),apiKey);
+      setExtracted(result);
+    }catch(e){setError(e.message)}
+    setLoading(false);
+  };
+
+  const foundNames=extracted?Object.keys(extracted.results):[];
+  const notFound=extracted?sailors.map(s=>s.name).filter(n=>!foundNames.find(f=>f.toLowerCase()===n.toLowerCase())):[];
+  const inp={padding:"9px 12px",borderRadius:6,border:"1px solid "+C.border,background:C.surface,color:C.text,fontSize:14,fontFamily:sans};
+
+  return<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16,backdropFilter:"blur(2px)"}}>
+    <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:14,width:"100%",maxWidth:540,maxHeight:"92vh",overflowY:"auto",boxShadow:"0 32px 80px rgba(0,0,0,0.6)"}}>
+      <div style={{padding:"18px 20px 14px",borderBottom:"1px solid "+C.border,display:"flex",justifyContent:"space-between",alignItems:"flex-start",position:"sticky",top:0,background:C.card,zIndex:1}}>
+        <div>
+          <div style={{fontSize:16,fontWeight:700,color:C.white}}>Import Results from Image</div>
+          <div style={{fontSize:12,color:C.textMuted,marginTop:2}}>AI reads your screenshot and fills in sailor results automatically</div>
+        </div>
+        <button onClick={onClose} style={{background:"none",border:"1px solid "+C.border,borderRadius:6,color:C.textDim,fontSize:16,cursor:"pointer",width:30,height:30,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,marginLeft:12}}>✕</button>
+      </div>
+      <div style={{padding:20,display:"flex",flexDirection:"column",gap:16}}>
+
+        <div>
+          <div style={{fontSize:11,color:C.textDim,marginBottom:6,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px"}}>Claude API Key</div>
+          <div style={{display:"flex",gap:6}}>
+            <input type={showKey?"text":"password"} placeholder="sk-ant-api03-..." value={apiKey} onChange={e=>setApiKey(e.target.value)} style={{...inp,fontFamily:mono,fontSize:12,flex:1}}/>
+            <button onClick={()=>setShowKey(!showKey)} style={{padding:"9px 12px",borderRadius:6,border:"1px solid "+C.border,background:C.surface,color:C.textDim,cursor:"pointer",fontSize:12,flexShrink:0}}>{showKey?"Hide":"Show"}</button>
+          </div>
+          <div style={{fontSize:11,color:C.textMuted,marginTop:4}}>Stored only in your browser. Used only to call Anthropic's API. Get a key at console.anthropic.com.</div>
+        </div>
+
+        <div>
+          <div style={{fontSize:11,color:C.textDim,marginBottom:6,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px"}}>Results Sheet Image</div>
+          <div onDragOver={e=>e.preventDefault()} onDrop={e=>{e.preventDefault();handleFile(e.dataTransfer.files[0])}} onClick={()=>fileRef.current.click()} style={{border:"2px dashed "+(imgPreview?C.primary:C.border),borderRadius:8,padding:imgPreview?"8px":"28px 16px",textAlign:"center",cursor:"pointer",background:C.surface,transition:"border-color 0.2s"}}>
+            {imgPreview
+              ?<img src={imgPreview} style={{maxWidth:"100%",maxHeight:200,borderRadius:6,objectFit:"contain"}} alt="preview"/>
+              :<div><div style={{fontSize:32,marginBottom:8}}>📋</div><div style={{color:C.textDim,fontSize:14,fontWeight:600}}>Drag & drop or click to upload</div><div style={{color:C.textMuted,fontSize:12,marginTop:4}}>PNG, JPG, screenshot of the results sheet</div></div>}
+          </div>
+          <input ref={fileRef} type="file" accept="image/*" style={{display:"none"}} onChange={e=>handleFile(e.target.files[0])}/>
+          {imgPreview&&<button onClick={()=>{setImgPreview(null);setImgBase64(null);setExtracted(null)}} style={{marginTop:6,background:"none",border:"none",color:C.textMuted,fontSize:12,cursor:"pointer",padding:0}}>Remove image ✕</button>}
+        </div>
+
+        <div style={{padding:"10px 14px",borderRadius:6,background:C.surface,border:"1px solid "+C.border}}>
+          <div style={{fontSize:11,color:C.textDim,marginBottom:6,fontWeight:700}}>Searching for {sailors.length} sailor{sailors.length!==1?"s":""}:</div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:4}}>{sailors.map((s,i)=><Badge key={i} color={C.primary}>{s.name}</Badge>)}</div>
+          {sailors.length===0&&<div style={{fontSize:12,color:C.textMuted}}>Add sailors first, then import their results</div>}
+        </div>
+
+        {error&&<div style={{padding:"10px 14px",borderRadius:6,background:C.red+"15",border:"1px solid "+C.red+"33",color:C.red,fontSize:13}}>{error}</div>}
+
+        <button onClick={doExtract} disabled={loading||!imgBase64||sailors.length===0} style={{padding:"12px",borderRadius:8,border:"none",background:loading||!imgBase64||sailors.length===0?C.surface:"linear-gradient(135deg,"+C.primary+","+C.violet+")",color:loading||!imgBase64||sailors.length===0?C.textMuted:C.white,fontFamily:sans,fontSize:14,fontWeight:700,cursor:loading||!imgBase64||sailors.length===0?"not-allowed":"pointer",transition:"opacity 0.2s"}}>
+          {loading?"🔍 Extracting results...":"Extract Results with AI"}
+        </button>
+
+        {extracted&&<div>
+          <div style={{padding:"10px 14px",borderRadius:6,background:C.green+"12",border:"1px solid "+C.green+"30",marginBottom:12}}>
+            <div style={{fontSize:13,color:C.green,fontWeight:700}}>Found {foundNames.length}/{sailors.length} sailors • {extracted.races} race{extracted.races!==1?"s":""} detected</div>
+            {notFound.length>0&&<div style={{fontSize:12,color:C.amber,marginTop:4}}>Not found: {notFound.join(", ")}</div>}
+          </div>
+          <div style={{overflowX:"auto",marginBottom:12,borderRadius:6,border:"1px solid "+C.border}}>
+            <table style={{fontFamily:mono,fontSize:13}}>
+              <thead><tr style={{borderBottom:"2px solid "+C.border,background:C.surface}}>
+                <th style={{textAlign:"left",color:C.textDim,padding:"8px 12px",fontSize:11,fontFamily:sans}}>Sailor</th>
+                {Array.from({length:extracted.races},(_,i)=><th key={i} style={{textAlign:"center",color:C.primary,padding:"8px 8px",fontSize:11,minWidth:36}}>R{i+1}</th>)}
+              </tr></thead>
+              <tbody>{foundNames.map((name,i)=><tr key={i} style={{borderBottom:"1px solid "+C.border+"33"}}>
+                <td style={{padding:"8px 12px",color:C.white,fontFamily:sans,fontWeight:600}}>{name}</td>
+                {extracted.results[name].map((r,j)=><td key={j} style={{padding:"8px",textAlign:"center",color:r==null?C.textMuted:isPen(r)?C.red:C.green,fontWeight:r!=null?700:400}}>{r??"-"}</td>)}
+              </tr>)}</tbody>
+            </table>
+          </div>
+          <button onClick={()=>{onApply(extracted);onClose()}} style={{width:"100%",padding:"13px",borderRadius:8,border:"none",background:C.green,color:C.white,fontFamily:sans,fontSize:14,fontWeight:700,cursor:"pointer",boxShadow:"0 4px 16px "+C.green+"44"}}>
+            Apply Results to My Sailors
+          </button>
+        </div>}
+      </div>
+    </div>
+  </div>;
 }
 
 function Card({children,style,highlight,accent}){return<div style={{background:C.card,borderRadius:10,border:"1px solid "+(highlight?C.primary+"55":C.border),padding:16,position:"relative",overflow:"hidden",...style}}>{accent&&<div style={{position:"absolute",left:0,top:0,bottom:0,width:3,background:accent,borderRadius:"10px 0 0 10px"}}/>}{children}</div>}
@@ -113,6 +243,18 @@ function PrelimView({prelim,setPrelim}){
   const [newName,setNewName]=useState("");
   const [expS,setExpS]=useState(null);
   const [expR,setExpR]=useState(null);
+  const [showImport,setShowImport]=useState(false);
+  const handleImport=(extracted)=>{
+    const n=extracted.races;
+    setConfig(c=>({...c,totalRaces:Math.max(c.totalRaces,n),racesCompleted:Math.min(Math.max(c.racesCompleted,n),Math.max(c.totalRaces,n))}));
+    setSailors(prev=>prev.map(sailor=>{
+      const key=Object.keys(extracted.results).find(k=>k.toLowerCase()===sailor.name.toLowerCase());
+      if(!key)return sailor;
+      const nr=[...sailor.results];
+      extracted.results[key].forEach((r,i)=>{while(nr.length<=i)nr.push(null);if(r!=null)nr[i]=r});
+      return{...sailor,results:nr};
+    }));
+  };
   const est=useMemo(()=>estimateGoldCutoff(config.totalEntries,config.numFleets,config.totalRaces),[config]);
   const addS=()=>{if(!newName.trim())return;setSailors(p=>[...p,{name:newName.trim(),results:[]}]);setNewName("")};
   const remS=(i)=>setSailors(p=>p.filter((_,j)=>j!==i));
@@ -148,8 +290,12 @@ function PrelimView({prelim,setPrelim}){
         {est.hasDisc&&<span style={{color:C.amber}}> — one worst result dropped</span>}
       </div>
     </Card>
+    {showImport&&<ImportModal sailors={mySailors} onApply={handleImport} onClose={()=>setShowImport(false)}/>}
     <Card>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><SectionTitle>My Sailors</SectionTitle><Badge>{mySailors.length}</Badge></div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+        <div style={{display:"flex",alignItems:"center",gap:8}}><SectionTitle>My Sailors</SectionTitle><Badge>{mySailors.length}</Badge></div>
+        {mySailors.length>0&&<button onClick={()=>setShowImport(true)} style={{padding:"6px 12px",borderRadius:6,border:"1px solid "+C.violet+"44",background:C.violet+"15",color:C.violet,fontFamily:sans,fontSize:12,fontWeight:700,cursor:"pointer"}}>📋 Import from Image</button>}
+      </div>
       <div style={{display:"flex",gap:8,marginBottom:12}}>
         <input placeholder="Sailor name" value={newName} onChange={e=>setNewName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addS()} style={{flex:1,padding:"10px 12px",borderRadius:6,border:"1px solid "+C.border,background:C.surface,color:C.text,fontSize:14,fontFamily:sans}}/>
         <button onClick={addS} style={{padding:"10px 16px",borderRadius:6,border:"none",background:C.primary,color:C.bg,fontFamily:sans,fontSize:14,fontWeight:700,cursor:"pointer"}}>+</button>
@@ -227,6 +373,18 @@ function ElimView({elim,setElim}){
   const estOptimistic=Math.round(estTotalCutoff*0.85);
   const estPessimistic=Math.round(estTotalCutoff*1.15);
 
+  const [showImport,setShowImport]=useState(false);
+  const handleImport=(extracted)=>{
+    const n=extracted.races;
+    setConfig(c=>({...c,totalRaces:Math.max(c.totalRaces,n),racesCompleted:Math.min(Math.max(c.racesCompleted,n),Math.max(c.totalRaces,n))}));
+    setSailors(prev=>prev.map(sailor=>{
+      const key=Object.keys(extracted.results).find(k=>k.toLowerCase()===sailor.name.toLowerCase());
+      if(!key)return sailor;
+      const nr=[...sailor.results];
+      extracted.results[key].forEach((r,i)=>{while(nr.length<=i)nr.push(null);if(r!=null)nr[i]=r});
+      return{...sailor,results:nr};
+    }));
+  };
   const addS=()=>{
     if(!newName.trim()||!newPrelimRank)return;
     setSailors(p=>[...p,{name:newName.trim(),prelimRank:Number(newPrelimRank),results:[]}]);
@@ -272,8 +430,12 @@ function ElimView({elim,setElim}){
       </div>
     </Card>
 
+    {showImport&&<ImportModal sailors={mySailors} onApply={handleImport} onClose={()=>setShowImport(false)}/>}
     <Card>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><SectionTitle>Sailors</SectionTitle><Badge>{mySailors.length}</Badge></div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+        <div style={{display:"flex",alignItems:"center",gap:8}}><SectionTitle color={C.amber}>Sailors</SectionTitle><Badge color={C.amber}>{mySailors.length}</Badge></div>
+        {mySailors.length>0&&<button onClick={()=>setShowImport(true)} style={{padding:"6px 12px",borderRadius:6,border:"1px solid "+C.violet+"44",background:C.violet+"15",color:C.violet,fontFamily:sans,fontSize:12,fontWeight:700,cursor:"pointer"}}>📋 Import from Image</button>}
+      </div>
       <div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}}>
         <input placeholder="Name" value={newName} onChange={e=>setNewName(e.target.value)} style={{...inputS,fontFamily:sans,flex:"2 1 120px"}} onKeyDown={e=>e.key==="Enter"&&addS()}/>
         <input placeholder="Prelim Rank" value={newPrelimRank} onChange={e=>setNewPrelimRank(e.target.value.replace(/[^0-9]/g,""))} style={{...inputS,fontFamily:mono,flex:"1 1 80px",textAlign:"center"}} onKeyDown={e=>e.key==="Enter"&&addS()}/>

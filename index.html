@@ -97,7 +97,10 @@ function StatusBadge({net,optimistic,expected,pessimistic}){
 function estimateGoldCutoff(totalEntries,numFleets,totalRaces){
   const gs=Math.ceil(totalEntries/numFleets);const fs=gs;const pen=fs+1;
   const avg=Math.round(fs/numFleets);const hasDisc=totalRaces>=4;const cr=hasDisc?totalRaces-1:totalRaces;
-  const exp=avg*cr;return{gs,fs,pen,avg,cr,exp,opt:Math.round(exp*0.85),pes:Math.round(exp*1.15),totalRaces,hasDisc};
+  // With a drop, the dropped race is ~1.5× avg (worse than average), so effective counting avg is lower.
+  // Use (cr - 0.5) when drop is active to model that the drop saves more than an average race.
+  const effCr=hasDisc?cr-0.5:cr;
+  const exp=Math.round(avg*effCr);return{gs,fs,pen,avg,cr,exp,opt:Math.round(exp*0.85),pes:Math.round(exp*1.15),totalRaces,hasDisc};
 }
 
 // ═══════════════════════════════════════

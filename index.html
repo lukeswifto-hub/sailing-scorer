@@ -300,15 +300,20 @@ function Card({children,style,highlight,accent}){return<div style={{background:C
 function Badge({children,color=C.primary}){return<span style={{display:"inline-block",padding:"2px 8px",borderRadius:20,background:color+"25",color,fontSize:11,fontFamily:mono,fontWeight:700,letterSpacing:"0.3px"}}>{children}</span>}
 function SectionTitle({children,color}){return<h3 style={{color:color||C.primary,fontFamily:sans,fontSize:12,margin:"0 0 12px",textTransform:"uppercase",letterSpacing:"1.5px",fontWeight:700}}>{children}</h3>}
 function NumberStepper({label,value,onChange,min=0,max=999}){
+  const [draft,setDraft]=useState(String(value));
+  useEffect(()=>setDraft(String(value)),[value]);
+  const commit=(str)=>{const v=parseInt(str,10);onChange(!isNaN(v)?Math.min(max,Math.max(min,v)):value)};
   const bs={width:32,height:36,borderRadius:7,border:"1px solid "+C.border,background:C.surface,color:C.primary,fontSize:18,cursor:"pointer",fontFamily:mono,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,flexShrink:0};
   return<div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"9px 0",borderBottom:"1px solid "+C.border+"44"}}>
     <span style={{color:C.text,fontFamily:sans,fontSize:14}}>{label}</span>
     <div style={{display:"flex",alignItems:"center",gap:6}}>
       <button onClick={()=>onChange(Math.max(min,value-1))} style={bs}>−</button>
       <input
-        type="number" value={value} min={min} max={max}
-        onChange={e=>{const v=parseInt(e.target.value,10);if(!isNaN(v))onChange(Math.min(max,Math.max(min,v)))}}
-        style={{width:58,padding:"5px 6px",borderRadius:7,border:"1px solid "+C.border,background:C.surface,color:C.white,fontFamily:mono,fontSize:18,fontWeight:800,textAlign:"center",MozAppearance:"textfield"}}
+        type="number" value={draft} min={min} max={max}
+        onChange={e=>setDraft(e.target.value)}
+        onBlur={()=>commit(draft)}
+        onKeyDown={e=>{if(e.key==="Enter"){commit(draft);e.target.blur()}}}
+        style={{width:64,padding:"5px 6px",borderRadius:7,border:"1px solid "+C.border,background:C.surface,color:C.white,fontFamily:mono,fontSize:18,fontWeight:800,textAlign:"center"}}
       />
       <button onClick={()=>onChange(Math.min(max,value+1))} style={bs}>+</button>
     </div>
